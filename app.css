@@ -225,17 +225,11 @@ body:has(.action-dialog[open]),body:has(.sheet-overlay.open) { overflow:hidden; 
 .connection-card { margin:0 20px 30px; border-radius:23px; padding:22px; border:1px solid #ffffff25; background:#141728d9; }
 .connection-card h2 { margin-bottom:9px; }
 .connection-card p { font-size:14px; color:#b7b4c7; line-height:1.6; margin-bottom:20px; }
-.sync-summary { margin:0 20px 23px; display:flex; align-items:center; flex-wrap:wrap; gap:10px; color:#b3a9c3; font-size:12px; }
-.sync-summary button { margin-left:auto; color:#a1b9ff; font:inherit; border:0; background:none; padding:8px; cursor:pointer; }
-.sync-summary p { flex-basis:100%; color:#ffb6b6; }
 .auth-label { display:block; font-size:13px; margin-bottom:8px; color:#bfb6cd; }
 .auth-input { box-sizing:border-box; width:100%; border:1px solid #ffffff30; background:#07071266; color:#fff; border-radius:15px; padding:15px; font:inherit; font-size:17px; }
 .auth-error { color:#ffb6b6 !important; font-size:13px; line-height:1.5; }
 .text-action { display:block; width:100%; padding:16px; color:#b5b8d2; background:none; border:0; font:inherit; font-size:13px; cursor:pointer; }
 button:disabled { opacity:.6; cursor:wait; }
-.invite-credential-note { margin:24px 30px 0; text-align:center; color:#c0b7d1; font-size:12px; line-height:1.6; }
-#inviteView[data-credential="official"] .qr-avatar { display:none; }
-#inviteView[data-credential="loading"] #qrImage,#inviteView[data-credential="error"] #qrImage { display:grid; place-items:center; color:#333; text-align:center; padding:25px; font-size:14px; }
 #officialEventLink { display:inline-flex; align-items:center; text-decoration:none; }
 .generated-guest-notice { padding:14px 16px; margin-bottom:14px; border-radius:17px; border:1px solid #aaa1ff44; background:#6753a824; color:#c9bddf; font-size:12px; line-height:1.5; }
 .generated-guest-notice strong { display:block; color:#eee6ff; font-size:13px; margin-bottom:4px; }

@@ -31,8 +31,6 @@ let guestFilter = 'all';
 let guestQuery = '';
 let guestVisibleCount = 50;
 let toastTimer;
-let qrRefreshTimer;
-let qrRequestVersion = 0;
 let phoneHint = '';
 const hydrating = new Set();
 
@@ -84,11 +82,11 @@ function empty(title, message, symbol = 'search') {
 function home() {
   const events = eventStore.listEvents();
   const featured = events.find(event=>event.rsvp === 'going') || events.find(event=>event.access === 'invited') || events[0];
-  return `<div class="home-view"><header class="home-header"><h1 class="wordmark">doorlist</h1><div class="header-actions">${connectionBadge()}<a href="#/search" class="glass-button" aria-label="Search events">${icon('search')}</a></div></header>
+  return `<div class="home-view"><header class="home-header"><h1 class="wordmark">doorlist</h1><div class="header-actions"><a href="#/search" class="glass-button" aria-label="Search events">${icon('search')}</a></div></header>
     ${connectionPanel()}<section class="home-section"><h2>Coming up!</h2>${featured ? eventCard(featured,true) : empty('Nothing coming up','Your next invite will show up here.','calendar')}</section>
     <section class="home-section your-events"><a class="section-heading" href="#/events"><h2>Your events</h2>${icon('next')}</a><div class="event-rail">${events.map(event=>eventCard(event)).join('')}<button class="host-card" data-action="create"><span class="host-art">${icon('plus')}</span><strong>Become a Host</strong><span>Host and invite your friends!</span></button></div></section>
     <section class="home-section"><div class="section-heading"><h2>Upcoming</h2><span class="muted">${events.length} events</span></div><div class="week-list">${events.map(event=>eventRow(event)).join('')}</div></section>
-    <p class="preview-note">${connectionNote()}</p>${nav()}</div>`;
+    ${nav()}</div>`;
 }
 function eventRow(event) {
   return `<a class="event-row" href="#/event/${event.id}"><span class="event-row-art">${poster(event)}</span><span class="event-row-copy"><strong>${esc(event.title)}</strong><span>${esc(dateParts(event).full)} · ${esc(dateParts(event).time)}</span></span>${icon('next')}</a>`;
@@ -129,7 +127,6 @@ function profilePage() {
 function render() {
   let route;
   try { route = decodeURIComponent(location.hash.slice(1) || '/'); } catch { route = '/'; }
-  clearTimeout(qrRefreshTimer); qrRequestVersion++;
   const parts = route.split('/').filter(Boolean);
   const event = parts[0]==='event' ? eventStore.getEvent(parts[1]) : null;
   const qr = Boolean(event && parts[2]==='invite');
@@ -139,7 +136,6 @@ function render() {
   document.body.dataset.page = qr ? 'invite' : parts[0] || 'home';
   if (qr) {
     window.InviteView.show(event,eventStore.getProfile(), { live: event.source === 'doorlist' });
-    if (event.source === 'doorlist') refreshInvite(event.id, qrRequestVersion);
     document.title = `${event.title} — Your invite`;
   } else {
     window.InviteView.hide();
@@ -227,13 +223,9 @@ window.addEventListener('invite:settings', event=>{
   notify('Changes saved');
 });
 window.addEventListener('hashchange',render);
-window.addEventListener('invite:refresh', () => { const id = location.hash.split('/')[2]; if (eventStore.mode === 'live') refreshInvite(id, ++qrRequestVersion); });
 render();
 eventStore.initialize().finally(render);
 
-function connectionBadge() {
-  return `<button class="preview-badge" data-action="connect">${eventStore.mode === 'live' ? 'Connected' : eventStore.mode === 'preview' ? 'Preview' : 'Connect'}</button>`;
-}
 function connectionNote() {
   if (eventStore.mode === 'preview') return 'Sample events · Connect Doorlist for your live events.';
   if (eventStore.mode !== 'live') return 'Connect your Doorlist account to load your events.';
@@ -241,10 +233,8 @@ function connectionNote() {
   return `${count?.invited || 0} invited · ${count?.discoverable || 0} discoverable${count?.partial ? ' · Some events could not be loaded' : ''}`;
 }
 function connectionPanel() {
-  if (eventStore.status === 'loading') return '<section class="connection-card" role="status"><h2>Loading your events…</h2><p>Connecting to Doorlist.</p></section>';
-  if (eventStore.mode === 'live') return `<section class="sync-summary"><span>${eventStore.error ? 'Showing your last loaded events.' : eventStore.coverage?.partial ? 'Some events could not be loaded. Try refreshing.' : 'Your Doorlist events are up to date.'}</span><button data-action="refresh-events">Refresh</button>${eventStore.error ? `<p role="alert">${esc(eventStore.error)} Your last loaded events are shown.</p>` : ''}</section>`;
-  if (eventStore.mode === 'preview') return '<section class="sync-summary"><span>Sample UI</span><button data-action="connect">Connect Doorlist</button></section>';
-  return `<section class="connection-card"><h2>Your plans, all here.</h2><p>Sign in to pull the events available to your Doorlist account.</p>${eventStore.error ? `<p class="auth-error" role="alert">${esc(eventStore.error)}</p>` : ''}<button class="primary-button" data-action="connect">Connect Doorlist</button></section>`;
+  if (eventStore.status === 'loading' || eventStore.mode !== 'disconnected') return '';
+  return `<section class="connection-card"><h2>Your plans, all here.</h2><p>Sign in to see your events.</p>${eventStore.error ? `<p class="auth-error" role="alert">${esc(eventStore.error)}</p>` : ''}<button class="primary-button" data-action="connect">Sign in</button></section>`;
 }
 function connectionSheet(step = 'phone') {
   if (eventStore.authenticated) return sheet('Connected to Doorlist', `<p class="dialog-description">${esc(eventStore.getProfile().name)}</p><p class="dialog-note">${esc(connectionNote())}. Event access is controlled by Doorlist.</p><button class="primary-button" data-action="refresh-events">Refresh events</button><button class="text-action" data-action="disconnect">Disconnect this app</button>`);
@@ -301,20 +291,6 @@ async function hydrateEventRoute(event, guests) {
     else notify(error.message);
   } finally { hydrating.delete(key); }
 }
-async function refreshInvite(id, version) {
-  clearTimeout(qrRefreshTimer);
-  window.InviteView.setCredential({ kind: 'loading' });
-  try {
-    const result = await eventStore.loadInvite(id);
-    if (version !== qrRequestVersion || location.hash !== `#/event/${id}/invite`) return;
-    window.InviteView.setCredential(result);
-    if (result.kind === 'official') qrRefreshTimer = setTimeout(() => refreshInvite(id, version), Math.max(1000, result.refreshAfterMs));
-  } catch (error) {
-    if (!eventStore.authenticated) { location.hash='/'; render(); notify(error.message); return; }
-    if (version === qrRequestVersion) window.InviteView.setCredential({ kind: 'error', reason: error.message });
-  }
-}
-
 function guestSourceNote(event) {
   if (event.guestListGenerated) return 'Generated preview · Sample people, not confirmed attendees';
   if (event.source !== 'doorlist') return 'Sample guest list';

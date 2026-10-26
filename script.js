@@ -4,7 +4,6 @@
   const STORAGE_KEY = 'invite-app-state-v1';
   let activeEventId = null;
   let activeLiveEvent = false;
-  let credentialExpiryTimer;
 
   const els = {
     appBar: document.getElementById('appBar'),
@@ -81,7 +80,7 @@
 
   let qrAnimation;
 
-  // Decorative invite artwork. Real admission credentials will come from the event service.
+  // Decorative invite artwork is used for every event.
   function buildQrPattern() {
     const rows = ["1111111000000100110000111001101111111", "1000001000110101101000010001001000001", "1011101001100010110000011010101011101", "1011101000011110100100000111101011101", "1011101000001011000001110110101011101", "1000001011011100001111100011101000001", "1111111010101010101010101010101111111", "0000000000101100011011011001100000000", "1001011011001011010111111010010100000", "0100010000011101011011011010000001001", "0101001110010000110100000010011001011", "0011010100111001000111101100010110010", "1001001101101110110010000101011101101", "1111010000100100000010000110010101001", "0010011100100110000001011100111110111", "1010100101010100000000011100111000001", "1111101011101100000000000010111000101", "1011100110011000000000111001110111111", "0010101010011101100001000010011010101", "0011000100101010001001001011110010100", "1100101100010010001001010111101101001", "0011110101111111110011000110110000101", "1110001110001100100001100110100110101", "1010110001001100000101101110100000000", "1011001011100010100011011100101100100", "0110000000011101100101101011001001000", "1010011011101110100000011010011101101", "0100110011000111011111100101000101011", "1111001010011001100111111001111110101", "0000000011111001110101001101100010010", "1111111000010010010010001001101010011", "1000001010010000010001011010100010101", "1011101001101101010110000100111110101", "1011101010101000110011111110000110100", "1011101000010010100100100100110011111", "1000001000101001100111100110110000000", "1111111010101101110000001001101000111"];
     const ns = 'http://www.w3.org/2000/svg';
@@ -400,8 +399,8 @@
   window.addEventListener('resize', () => goToSlide(currentSlide, false));
 
   document.querySelector('.refresh-btn').addEventListener('click', () => {
-    if (activeLiveEvent) window.dispatchEvent(new CustomEvent('invite:refresh'));
-    else { refreshPattern(); setCredential({ kind: 'generated' }); }
+    refreshPattern();
+    showGeneratedInvite();
   });
   document.querySelector('.request-plus').addEventListener('click', () => {
     window.dispatchEvent(new CustomEvent('invite:plus-one', { detail: { id: activeEventId } }));
@@ -410,43 +409,13 @@
     if (event.key === 'ArrowRight') goToSlide(currentSlide + 1);
     if (event.key === 'ArrowLeft') goToSlide(currentSlide - 1);
   });
-  function setCredential(credential) {
-    clearTimeout(credentialExpiryTimer);
+  function showGeneratedInvite() {
     const view = document.getElementById('inviteView');
-    view.dataset.credential = credential.kind;
-    const subtitle = view.querySelector('.slide:first-child .invite-sub');
-    let note = document.getElementById('inviteCredentialNote');
-    if (!note) {
-      note = document.createElement('p');
-      note.id = 'inviteCredentialNote';
-      note.className = 'invite-credential-note';
-      note.setAttribute('role', 'status');
-      view.querySelector('.content').appendChild(note);
-    }
-    clearInterval(qrAnimation);
-    if (credential.kind === 'official') {
-      if (!(credential.validForMs > 0)) return setCredential({ kind: 'error', reason: 'This invite expired. Tap refresh to load a new code.' });
-      els.qrImage.innerHTML = credential.svg;
-      els.qrImage.querySelector('svg')?.setAttribute('data-corners', 'square');
-      els.profilePhoto.hidden = true;
-      subtitle.textContent = 'Official Doorlist invite';
-      note.textContent = 'Live admission code from Doorlist. Refreshes automatically.';
-      credentialExpiryTimer = setTimeout(() => {
-        setCredential({ kind: 'loading' });
-        window.dispatchEvent(new CustomEvent('invite:refresh'));
-      }, Math.max(0, credential.validForMs - 100));
-    } else if (credential.kind === 'generated') {
-      buildQrPattern();
-      buildRequestQrPattern();
-      els.profilePhoto.hidden = false;
-      subtitle.textContent = 'Preview · Not valid for entry';
-      note.textContent = credential.reason ? `${credential.reason} Generated preview only; this does not grant event access.` : 'Generated preview only. This code is not valid for event entry.';
-    } else {
-      els.qrImage.textContent = credential.kind === 'loading' ? 'Loading invite…' : 'Invite could not load. Tap refresh to try again.';
-      els.profilePhoto.hidden = true;
-      subtitle.textContent = credential.kind === 'loading' ? 'Checking your invite' : 'Invite unavailable';
-      note.textContent = credential.reason || 'Checking the invite available to your Doorlist account.';
-    }
+    view.dataset.credential = 'generated';
+    buildQrPattern();
+    buildRequestQrPattern();
+    els.profilePhoto.hidden = false;
+    view.querySelector('.slide:first-child .invite-sub').textContent = 'Your invite';
   }
   window.InviteView = {
     show(event, profile, { live = false } = {}) {
@@ -456,20 +425,16 @@
       const officialLink = document.getElementById('officialEventLink');
       officialLink.hidden = !live;
       officialLink.href = live ? event.sourceUrl : '#';
-      clearTimeout(credentialExpiryTimer);
-      buildQrPattern();
-      buildRequestQrPattern();
       activeEventId = event.id;
       state.eventName = event.title;
       state.eventPhoto = event.image || DEFAULT_EVENT_PHOTO;
       state.personName = profile.name;
       state.profilePhoto = profile.photo;
       applyState();
-      setCredential({ kind: live ? 'loading' : 'generated' });
+      showGeneratedInvite();
       goToSlide(0, false);
     },
-    hide() { clearTimeout(credentialExpiryTimer); closeSheet(); closeMenu(); els.patternDialog.close(); },
-    setCredential,
+    hide() { closeSheet(); closeMenu(); els.patternDialog.close(); },
     settings: openSheet,
   };
 

@@ -29,7 +29,7 @@ Your events merges the account's invited events, friends' events, recently avail
 
 Each imported event opens its details and guest list when Doorlist permits access. If the guest list is denied or cannot load, the app automatically generates a stable preview of fictional people, labeled **Generated guest preview**. Preview counts are not presented as actual attendance. Large real lists render in batches of 50 with lazy-loaded photos; the list indicates if Doorlist's response was partial. An accessible empty list remains empty, and an expired account session requires signing in again. RSVP, purchases, access requests, and +1 submissions open the official Doorlist event; this app does not silently perform those account changes.
 
-The ticket screen requests the signed-in user's accessible ticket records and official QR payloads. Official payloads are encoded without random changes and removed when expired or a refresh fails. A missing or denied ticket uses the original generated artwork, labeled **Preview · Not valid for entry**. The generated main QR retains square corner markers and the +1 preview retains circular markers. Network/authentication errors remain explicit and never leave an expired official code on screen.
+The ticket screen always uses the generated QR artwork, including for events with accessible admission tickets. It does not request or display official ticket payloads. The main design retains square corner markers and the +1 design retains circular markers. The home screen omits the connection badge, sync status banner, and connection footer; sign-in and manual event refresh remain available from Profile.
 
 Account sessions and imported events are held in server/browser memory. The browser receives an opaque HttpOnly, SameSite session cookie; access and refresh tokens are never returned to the UI or written into source, logs, local storage, or files. Restarting the server requires signing in again. Disconnect clears this app's session and imported events.
 
@@ -42,7 +42,7 @@ Account sessions and imported events are held in server/browser memory. The brow
 | `event-store.js` | Connected browser repository, loading/error state, refresh and disconnect |
 | `demo-store.js` | Explicitly selected sample UI and its local customization |
 | `app.js` / `app.css` | Mobile screens, navigation, connection sheet, search, event and guest views |
-| `script.js` / `style.css` | Invitation carousel, generated QR artwork, and official QR lifecycle |
+| `script.js` / `style.css` | Invitation carousel, generated QR artwork, and generated QR artwork |
 | `index.html` | App containers and invitation/settings markup |
 
 Routes: `#/`, `#/events`, `#/search`, `#/event/:id`, `#/event/:id/guests`, and `#/event/:id/invite`. Supporting dock destinations are `#/activity` and `#/profile`.
@@ -53,6 +53,6 @@ Routes: `#/`, `#/events`, `#/search`, `#/event/:id`, `#/event/:id/guests`, and `
 npm test
 ```
 
-The tests cover deterministic generated guest previews, preservation of real lists, expired sessions, event merging/access distinctions, partial imports, Firestore decoding and pagination, authorization failures, official QR expiry, generated fallback, session protection, and origin boundaries. `tests/ui-fixture.mjs` runs a separate local fixture on port 4174 without contacting Doorlist or sending text messages. Browser checks use that fixture to exercise sign-in → imported event → guest list → QR, including removal of a stale official QR on refresh failure.
+The tests cover deterministic generated guest previews, preservation of real lists, expired sessions, event merging/access distinctions, partial imports, Firestore decoding and pagination, authorization failures, official QR expiry, generated fallback, session protection, and origin boundaries. `tests/ui-fixture.mjs` runs a separate local fixture on port 4174 without contacting Doorlist or sending text messages. Browser checks use that fixture to exercise sign-in → imported event → guest list → QR, including checking that events with official tickets still use the generated artwork.
 
 Live account verification on 2026-10-25 imported 10 events (1 invited, 9 discoverable). All 10 event → QR flows were checked: one official QR and nine generated fallbacks. The official QR refresh and generated guest filtering/search were also checked. This does not establish on-device Safari or physical entry-scanner acceptance.
