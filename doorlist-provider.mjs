@@ -62,8 +62,9 @@ export class DoorlistProvider {
   }
   async request(url, options = {}) {
     let response;
-    try { response = await this.fetch(url, { ...options, signal: AbortSignal.timeout(20000), redirect: 'error' }); }
+    try { response = await this.fetch(url, { ...options, signal: AbortSignal.timeout(20000), redirect: 'manual' }); }
     catch { throw new ProviderError('Doorlist could not be reached. Try again.'); }
+    if (response.status >= 300 && response.status < 400) throw new ProviderError('Doorlist returned an unexpected redirect.', 502);
     let data = {};
     try { data = await response.json(); } catch { /* Some successful responses have no JSON body. */ }
     if (!response.ok) {

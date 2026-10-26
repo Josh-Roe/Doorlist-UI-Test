@@ -91,3 +91,10 @@ test('used or transferred tickets are not presented as active admission codes', 
   ] });
   assert.equal((await p.loadInvite('event-123')).kind, 'generated');
 });
+
+test('upstream fetch uses Worker-compatible manual redirects without forwarding credentials', async () => {
+  let redirectMode;
+  const p = new DoorlistProvider({fetchImpl: async (_url, options) => { redirectMode=options.redirect; return new Response('',{status:302,headers:{Location:'https://other.example'}}); }});
+  await assert.rejects(p.request('https://doorlist.app/api/test'), /unexpected redirect/);
+  assert.equal(redirectMode,'manual');
+});

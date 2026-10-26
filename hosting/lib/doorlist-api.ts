@@ -38,7 +38,11 @@ async function limit(db:D1Database,env:Runtime,value:string,max:number,cooldown:
       attempts=CASE WHEN started_at<? THEN 1 ELSE attempts+1 END,last_at=?
     WHERE last_at<=? AND (started_at<? OR attempts<?) RETURNING attempts`)
     .bind(id,now,now,now-window,now,now-window,now,now-cooldown,now-window,max).first();
-  if(!row)throw new ProviderError('Wait before requesting another code.',429);
+  if(!row) {
+    const previous=await db.prepare('SELECT started_at,last_at,attempts FROM doorlist_auth_limits WHERE id=?').bind(id).first<{started_at:number,last_at:number,attempts:number}>();
+    const delay=Math.max(1,Math.ceil(Math.max((previous?.last_at||now)+cooldown-now,(previous?.attempts||0)>=max?(previous?.started_at||now)+window-now:0)/1000));
+    throw new ProviderError(`Wait ${delay} seconds before requesting another code.`,429);
+  }
 }
 async function getSession(request:Request,env:Runtime) {
   const raw=/(?:^|;\s*)doorlist_session=([a-f0-9-]{36})(?:;|$)/.exec(request.headers.get('Cookie')||'')?.[1];
