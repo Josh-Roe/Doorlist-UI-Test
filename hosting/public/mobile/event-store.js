@@ -1,5 +1,6 @@
 import { eventStore as demoStore } from './demo-store.js';
 let events = [];
+let suggestedFriends = [];
 let profile = { name: 'You', photo: 'profile.png' };
 let authenticated = false;
 let mode = 'disconnected';
@@ -18,7 +19,7 @@ async function request(path, body) {
   try { data = await response.json(); } catch { throw new Error('Start the app with npm start to connect Doorlist.'); }
   if (!response.ok) {
     if (response.status === 401 && !path.startsWith('/api/auth/')) {
-      authenticated = false; mode = 'disconnected'; events = []; profile = { name: 'You', photo: 'profile.png' };
+      authenticated = false; mode = 'disconnected'; events = []; suggestedFriends = []; profile = { name: 'You', photo: 'profile.png' };
     }
     const error = new Error(data.error || 'Doorlist could not complete the request.');
     error.status = response.status;
@@ -35,6 +36,7 @@ export const eventStore = {
   get syncedAt() { return syncedAt; },
   listEvents: () => mode === 'preview' ? demoStore.listEvents() : structuredClone(events),
   getEvent: id => mode === 'preview' ? demoStore.getEvent(id) : structuredClone(events.find(event => event.id === id) || null),
+  getSuggestedFriends: () => mode === 'preview' ? demoStore.getGuests('house-night').slice(0, 6) : structuredClone(suggestedFriends),
   getProfile: () => mode === 'preview' ? demoStore.getProfile() : { ...profile },
   getGuests: id => eventStore.getEvent(id)?.guests || [],
   async initialize() {
@@ -51,7 +53,7 @@ export const eventStore = {
     status = 'loading'; error = '';
     try {
       const result = await request('/api/events');
-      events = result.events; profile = result.profile; coverage = result.coverage; syncedAt = result.syncedAt;
+      events = result.events; suggestedFriends = result.suggestedFriends || []; profile = result.profile; coverage = result.coverage; syncedAt = result.syncedAt;
       mode = 'live'; status = 'ready';
       return result;
     } catch (cause) { status = 'error'; error = cause.message; throw cause; }
@@ -64,7 +66,7 @@ export const eventStore = {
   },
   async disconnect() {
     await request('/api/auth/disconnect', {});
-    events = []; profile = { name: 'You', photo: 'profile.png' }; mode = 'disconnected'; authenticated = false;
+    events = []; suggestedFriends = []; profile = { name: 'You', photo: 'profile.png' }; mode = 'disconnected'; authenticated = false;
     status = 'ready'; error = ''; coverage = null; syncedAt = null;
   },
   usePreview() { mode = 'preview'; status = 'ready'; error = ''; },

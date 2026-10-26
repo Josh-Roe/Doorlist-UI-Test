@@ -40,6 +40,8 @@ export function normalizeEvent(event, access = 'discover') {
   const end = toISO(event.endTime, start);
   return {
     id, title: String(event.name), host: String(event.orgName || event.hostName || 'Doorlist event'),
+    hostId: String(event.orgFBid || event.orgID || event.hostID || ''),
+    hostPhoto: safeImage(event.orgCoverPhoto || event.hostPhoto || event.hostProfilePicture),
     image: safeImage(event.eventCoverCroppedURL || event.eventCoverURL || event.coverPhotoURL),
     theme: 'purple', startsAt: start, endsAt: end,
     location: typeof event.location === 'string' ? event.location : String(event.locationName || event.address || 'See event details in Doorlist'),
@@ -164,13 +166,44 @@ export class DoorlistProvider {
     }
     this.allowedEvents = merged;
     const events = [...merged.values()].sort((a, b) => (a.startsAt || '9999').localeCompare(b.startsAt || '9999'));
+    await this.enrichEventPhotos(events);
+    let suggestedFriends = [];
+    try {
+      const result = await this.api(`/api/recommendations?user_uuid=${encodeURIComponent(this.profile.id)}&forEvent=`);
+      suggestedFriends = (Array.isArray(result.recommendations) ? result.recommendations : []).filter(person => person.uuid && person.name && !person.isFriendsWithUser && person.uuid !== this.profile.id).slice(0, 12).map(person => ({id:String(person.uuid), name:String(person.name), photo:safeImage(person.profilePicture || person.profilePictureUrl), mutualFriends:Number(person.mutualFriends) || 0, mutualEvents:Number(person.mutualEvents) || 0}));
+    } catch { /* Recommendations are optional; never manufacture real account connections. */ }
     const eligible = own.value.eligibleEventCount ?? (own.value.events || []).length;
     const limited = eligible > (own.value.events || []).length;
-    return { events, profile: this.profile, syncedAt: new Date(this.clock()).toISOString(), coverage: {
+    return { events, suggestedFriends, profile: this.profile, syncedAt: new Date(this.clock()).toISOString(), coverage: {
       invited: events.filter(event => event.access === 'invited').length,
       discoverable: events.filter(event => event.access === 'discover').length,
       eligibleEventCount: eligible, limited, partial: limited || results.some(result => result.status === 'rejected'),
     } };
+  }
+  async enrichEventPhotos(events) {
+    const hosts = new Map();
+    for (const event of events.slice(0,20)) {
+      if (!event.hostId || event.hostPhoto || hosts.has(event.hostId)) continue;
+      const id = event.hostId;
+      hosts.set(id, (async () => {
+        try {
+          const result = id.length > 20
+            ? await this.api('/api/users/light_details', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({uuids:[id]})})
+            : await this.api(`/api/group/${encodeURIComponent(id)}`);
+          const host = id.length > 20 ? result[id] : (result.group || result);
+          return safeImage(host?.orgCoverPhoto || host?.profilePictureUrl || host?.profilePicture);
+        } catch { return ''; }
+      })());
+    }
+    await Promise.all(events.slice(0, 20).map(async event => {
+      const [photo, circles] = await Promise.allSettled([
+        hosts.get(event.hostId) || Promise.resolve(event.hostPhoto),
+        this.api(`/api/event/${encodeURIComponent(event.id)}/circles`),
+      ]);
+      if (photo.status === 'fulfilled' && photo.value) event.hostPhoto = photo.value;
+      const rows = circles.status === 'fulfilled' ? (circles.value.guests || circles.value.attendees || []) : [];
+      event.guestPreview = (Array.isArray(rows) ? rows : []).filter(person => person.name).slice(0,4).map(person => ({id:String(person.uuid || ''),name:String(person.name),photo:safeImage(person.profilePhotoUrl || person.profilePictureUrl || person.profilePicture)}));
+    }));
   }
   requireEvent(id) {
     const event = this.allowedEvents.get(id);
@@ -186,7 +219,7 @@ export class DoorlistProvider {
     if (details.status === 'fulfilled') {
       const fields = decodeFields(details.value.fields);
       const normalized = normalizeEvent({ ...fields, eventId: id }, event.access);
-      if (normalized) event = { ...event, ...normalized, image: normalized.image || event.image };
+      if (normalized) event = { ...event, ...normalized, image: normalized.image || event.image, hostPhoto: normalized.hostPhoto || event.hostPhoto };
     }
     if (guest.status === 'fulfilled') {
       const fields = decodeFields(guest.value.fields);
@@ -211,7 +244,7 @@ export class DoorlistProvider {
         for (const doc of page.documents || []) {
           const guest = decodeFields(doc.fields);
           if (!guest.name || guest.name.startsWith('*')) continue;
-          guests.push({ id: doc.name.split('/').at(-1), name: guest.name, status: normalizeStatus(guest.rsvpStatus), photo: safeImage(guest.profilePhotoUrl), color: guests.length % 6 });
+          guests.push({ id: doc.name.split('/').at(-1), name: guest.name, status: normalizeStatus(guest.rsvpStatus), photo: safeImage(guest.profilePhotoUrl || guest.profilePhotoURL || guest.profilePictureUrl || guest.profilePicture || guest.photoURL), color: guests.length % 6 });
         }
         pageToken = page.nextPageToken || '';
       } while (pageToken && pages < 5);

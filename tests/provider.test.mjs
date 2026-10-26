@@ -113,3 +113,23 @@ test('network function retains its global receiver and health checks never send 
   assert.equal(await p.checkConnection(),true);
   assert.equal(calls,1);
 });
+
+test('event hosts and guest previews retain accessible photos without granting event access', async () => {
+  const p=provider();
+  const event=normalizeEvent(raw('event-photos',{orgFBid:'host-group',orgName:'Test host'}));
+  p.api=async path=>path.startsWith('/api/group/')?{orgCoverPhoto:'https://images.example/host.jpg'}:{guests:[{uuid:'guest-one',name:'Guest One',profilePhotoUrl:'https://images.example/guest.jpg'}]};
+  await p.enrichEventPhotos([event]);
+  assert.equal(event.hostPhoto,'https://images.example/host.jpg');
+  assert.equal(event.guestPreview[0].photo,'https://images.example/guest.jpg');
+  assert.equal(event.access,'discover');
+  p.api=async()=>{throw new ProviderError('Unavailable',403);};
+  await p.enrichEventPhotos([event]);
+  assert.equal(event.hostPhoto,'https://images.example/host.jpg');
+});
+test('guest photo aliases are normalized and unsafe photo URLs are rejected', async () => {
+  const p=provider();p.allowedEvents.set('event-photos',{});
+  p.firestore=async()=>({documents:[{name:'guests/one',fields:{name:{stringValue:'Guest One'},profilePicture:{stringValue:'https://images.example/photo.jpg'}}},{name:'guests/two',fields:{name:{stringValue:'Guest Two'},profilePhotoUrl:{stringValue:'javascript:bad()'}}}]});
+  const result=await p.loadGuests('event-photos');
+  assert.equal(result.guests[0].photo,'https://images.example/photo.jpg');
+  assert.equal(result.guests[1].photo,'');
+});

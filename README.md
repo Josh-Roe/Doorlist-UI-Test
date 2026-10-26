@@ -33,12 +33,19 @@ The ticket screen always uses the generated QR artwork, including for events wit
 
 Account sessions and imported events are held in server/browser memory. The browser receives an opaque HttpOnly, SameSite session cookie; access and refresh tokens are never returned to the UI or written into source, logs, local storage, or files. Restarting the server requires signing in again. Disconnect clears this app's session and imported events.
 
+## Native-style UI
+
+Home follows the observed Doorlist section order: Coming up, Your events, Sway advertisement, Suggested friends, and Get people together. The duplicate Discover list is omitted. Suggested people, attendee circles, and host photos use account-authorized Doorlist responses; unavailable photos use local profile artwork. The Sway card opens the [official ballot-party offer](https://www.sway.co/ballot-party). Event-template and friend actions open Doorlist for the actual account action.
+
+Navigation uses push/back transitions for event pages, slide-up presentation for generated QR screens, and crossfades for tabs. The event background uses Doorlist’s published Purple Confetti video. Reduced motion pauses video playback and disables transitions. Floating controls use translucent blur, saturation, edge highlights, and press feedback informed by [Apple's materials guidance](https://developer.apple.com/design/human-interface-guidelines/materials). This is a web recreation, not the native system Liquid Glass renderer. The template-card illustrations are recreated artwork rather than the native image assets.
+
 ## Source structure
 
 | File | Responsibility |
 | --- | --- |
 | `server.mjs` | Local HTTP server, SMS sign-in, session and origin boundaries, allowlisted API routes |
 | `doorlist-provider.mjs` | Doorlist account/event requests, normal user-authenticated Firestore reads, pagination, QR encoding |
+| `avatar.js` | Local profile-image fallback artwork and safe photo selection |
 | `event-store.js` | Connected browser repository, loading/error state, refresh and disconnect |
 | `demo-store.js` | Explicitly selected sample UI and its local customization |
 | `app.js` / `app.css` | Mobile screens, navigation, connection sheet, search, event and guest views |
