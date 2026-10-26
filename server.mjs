@@ -4,7 +4,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { DoorlistProvider, ProviderError } from './doorlist-provider.mjs';
 
-const files = new Set(['index.html', 'app.js', 'app.css', 'event-store.js', 'avatar.js', 'guest-list.js', 'demo-store.js', 'script.js', 'style.css', 'manifest.webmanifest', 'profile.png', 'event.png', 'qr.svg', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png', 'assets/doorlist-bar-crawl.png', 'assets/doorlist-birthday.png', 'assets/doorlist-study-sesh.png', 'assets/doorlist-sunday-scaries.png', 'assets/doorlist-warm-up.png', 'assets/doorlist-watch-party.png', 'assets/doorlist-host-stack.png']);
+const files = new Set(['index.html', 'app.js', 'app.css', 'event-store.js', 'page-navigation.js', 'avatar.js', 'guest-list.js', 'demo-store.js', 'script.js', 'style.css', 'manifest.webmanifest', 'profile.png', 'event.png', 'qr.svg', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png', 'assets/doorlist-bar-crawl.png', 'assets/doorlist-birthday.png', 'assets/doorlist-study-sesh.png', 'assets/doorlist-sunday-scaries.png', 'assets/doorlist-warm-up.png', 'assets/doorlist-watch-party.png', 'assets/doorlist-host-stack.png']);
 const mime = { html: 'text/html; charset=utf-8', js: 'text/javascript; charset=utf-8', css: 'text/css; charset=utf-8', webmanifest: 'application/manifest+json', png: 'image/png', svg: 'image/svg+xml' };
 export function createDoorlistServer({ providerFactory = () => new DoorlistProvider(), clock = Date.now, port = Number(process.env.PORT || 4173) } = {}) {
   const sessions = new Map(); const codeLimits = new Map();

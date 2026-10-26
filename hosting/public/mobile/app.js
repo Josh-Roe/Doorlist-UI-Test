@@ -1,3 +1,4 @@
+import { createPageNavigation } from './page-navigation.js';
 import { eventStore } from './event-store.js';
 import { avatarFallback, profileImage } from './avatar.js';
 import { orderedGuests, guestDisplayStatus } from './guest-list.js';
@@ -6,6 +7,7 @@ const app = document.getElementById('appView');
 const invite = document.getElementById('inviteView');
 const dialog = document.getElementById('actionDialog');
 const toast = document.getElementById('toast');
+const pageNavigation=createPageNavigation({app,invite,onActivity:updateConfettiPlayback,onSettled:()=>{if(pendingDataRender)renderDataUpdate();}});
 const icons = {
   back: '<path d="m14 5-7 7 7 7"/>',
   next: '<path d="m9 5 7 7-7 7"/>',
@@ -146,9 +148,9 @@ document.addEventListener('playing',event=>{
 },true);
 const motionPreference=matchMedia('(prefers-reduced-motion: reduce)');
 function updateConfettiPlayback() {
-  document.querySelectorAll('.avatar-stack').forEach(stack=>stack.style.setProperty('--avatars-play-state',document.hidden||!stack.dataset.inView?'paused':'running'));
+  document.querySelectorAll('.avatar-stack').forEach(stack=>stack.style.setProperty('--avatars-play-state',document.hidden||document.documentElement.dataset.pageMoving||!stack.dataset.inView?'paused':'running'));
   document.querySelectorAll('.confetti-video,.template-video').forEach(video=>{
-    if(document.hidden || motionPreference.matches || app.hidden || (video.matches('.template-video')&&!video.dataset.inView))video.pause();
+    if(document.hidden || document.documentElement.dataset.pageMoving || motionPreference.matches || app.hidden || (video.matches('.template-video')&&!video.dataset.inView))video.pause();
     else video.play().catch(()=>{});
   });
 }
@@ -213,8 +215,8 @@ function bindGuestScroll() {
 function repaintGuests(event) {
   const anchor=Array.from(document.querySelectorAll('.guest-row')).find(row=>row.getBoundingClientRect().bottom>140);
   const id=anchor?.dataset.guestId, top=anchor?.getBoundingClientRect().top;
-  document.getElementById('guestResults').innerHTML=guestRows(event);
-  if(id){const next=Array.from(document.querySelectorAll('.guest-row')).find(row=>row.dataset.guestId===id);if(next)window.scrollBy(0,next.getBoundingClientRect().top-top);}
+  patchSurface(document.getElementById('guestResults'),guestRows(event));
+  if(id){const next=Array.from(document.querySelectorAll('.guest-row')).find(row=>row.dataset.guestId===id);if(next)pageNavigation.scroller.scrollBy(0,next.getBoundingClientRect().top-top);}
   bindGuestScroll();
 }
 async function loadNextGuestBatch(id) {
@@ -239,35 +241,24 @@ function profilePage() {
 const savedScroll = new Map();
 let pendingDataRender=false;
 function renderDataUpdate(){
-  if(activeTransition||dialog.open){pendingDataRender=true;return;}
+  if(pageNavigation.moving||document.documentElement.dataset.pageMoving||dialog.open){pendingDataRender=true;return;}
   pendingDataRender=false;render({background:true});
 }
 dialog.addEventListener('close',()=>{if(pendingDataRender)renderDataUpdate();});
-let activeTransition;
+
 function transitionKind(from,to) {
   if (to.endsWith('/invite')) return 'present';
   if (from.endsWith('/invite')) return 'dismiss';
-  if (!from.startsWith('/event/') && !to.startsWith('/event/')) return 'tab';
+  if (!from.startsWith('/event/') && !to.startsWith('/event/')) {const order=['/','/events','/search','/activity','/profile'];return order.indexOf(to)<order.indexOf(from)?'back':'forward';}
   return to.split('/').filter(Boolean).length < from.split('/').filter(Boolean).length ? 'back' : 'forward';
 }
 function navigate() {
   const target=location.hash.slice(1)||'/';
   if(target===currentRoute)return;
-  savedScroll.set(currentRoute,window.scrollY);
+  savedScroll.set(currentRoute,pageNavigation.scroller.scrollTop);
   const kind=transitionKind(currentRoute,target);
   document.documentElement.dataset.navigation=kind;
-  activeTransition?.cancel();
-  activeTransition=null;
-  // Commit the route immediately. Snapshotting long lists and playing video is expensive.
-  render();
-  if(matchMedia('(prefers-reduced-motion: reduce)').matches)return;
-  const surface=invite.hidden?app:invite;
-  const animation=surface.animate([{opacity:.86},{opacity:1}],{duration:140,easing:'ease-out'});
-  activeTransition=animation;
-  animation.finished.catch(()=>{}).finally(()=>{
-    if(activeTransition!==animation)return;
-    activeTransition=null;if(pendingDataRender)renderDataUpdate();
-  });
+  pageNavigation.slide(kind,()=>render());
 }
 // Keep images, video decoders and focused controls alive during background updates.
 function patchSurface(parent,html) {
@@ -294,7 +285,7 @@ function patchSurface(parent,html) {
   reconcile(parent,template.content);
 }
 function render({background=false}={}) {
-  const previousY=window.scrollY;
+  const previousY=pageNavigation.scroller.scrollTop;
   const rails=background?[...document.querySelectorAll('.coming-up-rail,.friends-rail,.gathering-rail')].map(node=>[node.className,node.scrollLeft]):[];
   let route;
   try { route = decodeURIComponent(location.hash.slice(1) || '/'); } catch { route = '/'; }
@@ -306,6 +297,7 @@ function render({background=false}={}) {
   if(!background)dialog.close();
   app.hidden = qr;
   invite.hidden = !qr;
+  pageNavigation.syncVisibility();
   document.body.dataset.page = qr ? 'invite' : parts[0] || 'home';
   if (qr) {
     if(!background)window.InviteView.show(event,eventStore.getProfile(), { live: event.source === 'doorlist' });
@@ -324,11 +316,11 @@ function render({background=false}={}) {
     document.title = event ? `${event.title} — Doorlist` : 'Doorlist';
   }
   if (currentRoute !== route) {
-    window.scrollTo(0,document.documentElement.dataset.navigation==='back' ? savedScroll.get(route)||0 : 0);
+    pageNavigation.scroller.scrollTo(0,['back','dismiss'].includes(document.documentElement.dataset.navigation) ? savedScroll.get(route)||0 : 0);
     if (!qr && app.querySelector('h1')) { app.querySelector('h1').tabIndex=-1; app.querySelector('h1').focus({preventScroll:true}); }
   }
   currentRoute = route;
-  if(background){window.scrollTo(0,previousY);for(const [className,left] of rails){const rail=document.getElementsByClassName(className)[0];if(rail)rail.scrollLeft=left;}}
+  if(background){pageNavigation.scroller.scrollTo(0,previousY);for(const [className,left] of rails){const rail=document.getElementsByClassName(className)[0];if(rail)rail.scrollLeft=left;}}
   queueMicrotask(bindTemplateMotion);
   if(parts[2]==='guests')queueMicrotask(bindGuestScroll);
   if(!qr&&parts.length===0&&activeHeroId){const rail=document.querySelector('.coming-up-rail');const card=rail?.querySelector(`a[href="#/event/${activeHeroId}"]`);if(card)rail.scrollLeft=card.offsetLeft-rail.offsetLeft;}
@@ -469,6 +461,7 @@ async function refreshEvents() {
 }
 async function hydrateEventRoute(event, guests) {
   const key = `${event.id}:${guests ? 'guests' : 'details'}`;
+  if(document.documentElement.dataset.pageMoving){pendingDataRender=true;return;}
   if (!eventStore.authenticated || hydrating.has(key) || (guests ? event.guestsLoaded&&!event.guestListStale : event.detailsLoaded&&!event.detailsStale)) return;
   hydrating.add(key);
   try {

@@ -150,7 +150,7 @@
     // Swap occupied and empty grid positions to retain identical dot density.
     window.clearInterval(qrAnimation);
     qrAnimation = window.setInterval(() => {
-      if (document.hidden || document.getElementById('inviteView').hidden) return;
+      if (document.hidden || document.documentElement.dataset.pageMoving || document.getElementById('inviteView').hidden) return;
       const on = cells.filter(cell => cell.active);
       const off = cells.filter(cell => !cell.active);
       const swaps = Math.min(65, on.length, off.length);
