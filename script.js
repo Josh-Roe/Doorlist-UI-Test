@@ -2,13 +2,15 @@
   'use strict';
 
   const STORAGE_KEY = 'invite-app-state-v1';
+  let activeEventId = null;
+  let activeLiveEvent = false;
+  let credentialExpiryTimer;
 
   const els = {
     appBar: document.getElementById('appBar'),
     settingsBtn: document.getElementById('settingsBtn'),
     patternBtn: document.getElementById('patternBtn'),
     patternDialog: document.getElementById('patternDialog'),
-    cornerPattern: document.getElementById('cornerPattern'),
     basePattern: document.getElementById('basePattern'),
     closeBtn: document.getElementById('closeBtn'),
 
@@ -43,7 +45,6 @@
     personName: 'Josh is da real goat',
     eventPhoto: DEFAULT_EVENT_PHOTO,
     profilePhoto: DEFAULT_AVATAR,
-    cornerPattern: 'square',
     basePattern: 'small',
   };
 
@@ -78,7 +79,9 @@
     els.eventPreview.classList.toggle('reference-event', false);
   }
 
-  // Use the supplied reference's exact QR artwork; no random replacement pattern.
+  let qrAnimation;
+
+  // Decorative invite artwork. Real admission credentials will come from the event service.
   function buildQrPattern() {
     const rows = ["1111111000000100110000111001101111111", "1000001000110101101000010001001000001", "1011101001100010110000011010101011101", "1011101000011110100100000111101011101", "1011101000001011000001110110101011101", "1000001011011100001111100011101000001", "1111111010101010101010101010101111111", "0000000000101100011011011001100000000", "1001011011001011010111111010010100000", "0100010000011101011011011010000001001", "0101001110010000110100000010011001011", "0011010100111001000111101100010110010", "1001001101101110110010000101011101101", "1111010000100100000010000110010101001", "0010011100100110000001011100111110111", "1010100101010100000000011100111000001", "1111101011101100000000000010111000101", "1011100110011000000000111001110111111", "0010101010011101100001000010011010101", "0011000100101010001001001011110010100", "1100101100010010001001010111101101001", "0011110101111111110011000110110000101", "1110001110001100100001100110100110101", "1010110001001100000101101110100000000", "1011001011100010100011011100101100100", "0110000000011101100101101011001001000", "1010011011101110100000011010011101101", "0100110011000111011111100101000101011", "1111001010011001100111111001111110101", "0000000011111001110101001101100010010", "1111111000010010010010001001101010011", "1000001010010000010001011010100010101", "1011101001101101010110000100111110101", "1011101010101000110011111110000110100", "1011101000010010100100100100110011111", "1000001000101001100111100110110000000", "1111111010101101110000001001101000111"];
     const ns = 'http://www.w3.org/2000/svg';
@@ -87,15 +90,8 @@
     svg.setAttribute('width', '100%');
     svg.setAttribute('height', '100%');
     svg.innerHTML = `<rect width="702" height="704" fill="#fff"/>`;
-    if (state.cornerPattern === 'square') {
-      svg.innerHTML += `<defs><clipPath id="fixed-finders"><rect x="28" y="26" width="130" height="127"/><rect x="552" y="26" width="123" height="127"/><rect x="28" y="551" width="130" height="128"/></clipPath></defs><image href="qr.svg" width="702" height="704" clip-path="url(#fixed-finders)"/>`;
-    } else {
-      const finders = document.createElementNS(ns, 'g');
-      [[88,86],[618,86],[88,619]].forEach(([cx, cy]) => {
-        [['#000',68],['#fff',48],['#000',26]].forEach(([fill,r]) => { const c=document.createElementNS(ns,'circle'); c.setAttribute('cx',cx); c.setAttribute('cy',cy); c.setAttribute('r',r); c.setAttribute('fill',fill); finders.appendChild(c); });
-      });
-      svg.appendChild(finders);
-    }
+    svg.dataset.corners = 'square';
+    svg.innerHTML += `<defs><clipPath id="fixed-finders"><rect x="28" y="26" width="130" height="127"/><rect x="552" y="26" width="123" height="127"/><rect x="28" y="551" width="130" height="128"/></clipPath></defs><image href="qr.svg" width="702" height="704" clip-path="url(#fixed-finders)"/>`;
     const connections = document.createElementNS(ns, 'g');
     connections.setAttribute('stroke', '#000');
     connections.setAttribute('stroke-width', '2.5');
@@ -152,8 +148,9 @@
     els.qrImage.style.backgroundImage = 'none';
     els.qrImage.replaceChildren(svg);
     // Swap occupied and empty grid positions to retain identical dot density.
-    window.setInterval(() => {
-      if (document.hidden) return;
+    window.clearInterval(qrAnimation);
+    qrAnimation = window.setInterval(() => {
+      if (document.hidden || document.getElementById('inviteView').hidden) return;
       const on = cells.filter(cell => cell.active);
       const off = cells.filter(cell => !cell.active);
       const swaps = Math.min(65, on.length, off.length);
@@ -175,6 +172,18 @@
     if (!source) return;
     const pattern = source.cloneNode(true);
     pattern.removeAttribute('id');
+    pattern.dataset.corners = 'circle';
+    pattern.querySelectorAll('defs, image').forEach(node => node.remove());
+    const finders = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    finders.dataset.finders = 'circle';
+    [[88, 86], [618, 86], [88, 619]].forEach(([cx, cy]) => {
+      [['#000', 68], ['#fff', 48], ['#000', 26]].forEach(([fill, r]) => {
+        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        Object.entries({ cx, cy, r, fill }).forEach(([key, value]) => circle.setAttribute(key, value));
+        finders.appendChild(circle);
+      });
+    });
+    pattern.appendChild(finders);
     pattern.setAttribute('aria-hidden', 'true');
     pattern.style.cssText = 'position:absolute; inset:0; width:100%; height:100%;';
     el.style.background = 'none';
@@ -195,31 +204,44 @@
   });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') { closeMenu(); closeSheet(); }
+    if (e.key === 'Tab' && els.sheetOverlay.classList.contains('open')) {
+      const controls = Array.from(els.sheet.querySelectorAll('input:not([hidden]), button'));
+      const first = controls[0], last = controls.at(-1);
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
   });
 
   // Safari browser chrome is controlled by Safari; standalone launch omits it.
   els.closeBtn.addEventListener('click', () => {
-    // No real navigation target in this standalone demo; just a visual affordance.
+    if (activeEventId) window.location.hash = `/event/${activeEventId}`;
+    else window.location.hash = '/';
   });
 
   // ---------- Settings sheet ----------
+  let sheetReturnFocus;
   function openSheet() {
+    sheetReturnFocus = document.activeElement;
+    els.sheetOverlay.inert = false;
     closeMenu();
     els.profilePreview.src = state.profilePhoto;
     els.eventPreview.src = state.eventPhoto;
     els.eventNameInput.value = state.eventName;
     els.personNameInput.value = state.personName;
     els.sheetOverlay.classList.add('open');
+    els.eventNameInput.focus();
   }
 
   function closeSheet() {
     els.sheetOverlay.classList.remove('open');
+    els.sheetOverlay.inert = true;
+    if (sheetReturnFocus?.isConnected) sheetReturnFocus.focus({ preventScroll: true });
+    sheetReturnFocus = null;
   }
 
   els.settingsBtn.addEventListener('click', openSheet);
   function openPattern() {
     closeMenu();
-    els.cornerPattern.value = state.cornerPattern;
     els.basePattern.value = state.basePattern;
     els.patternDialog.showModal();
     els.patternDialog.focus();
@@ -230,7 +252,6 @@
     buildRequestQrPattern();
     saveState();
   }
-  els.cornerPattern.addEventListener('change', () => { state.cornerPattern = els.cornerPattern.value; refreshPattern(); });
   els.basePattern.addEventListener('change', () => { state.basePattern = els.basePattern.value; refreshPattern(); });
   els.closeSheetBtn.addEventListener('click', closeSheet);
   els.sheetOverlay.addEventListener('click', (e) => {
@@ -264,6 +285,7 @@
     applyState();
     saveState();
     closeSheet();
+    window.dispatchEvent(new CustomEvent('invite:settings', { detail: { id: activeEventId, ...state } }));
   });
 
   // ---------- Swipeable carousel ----------
@@ -376,6 +398,80 @@
   });
 
   window.addEventListener('resize', () => goToSlide(currentSlide, false));
+
+  document.querySelector('.refresh-btn').addEventListener('click', () => {
+    if (activeLiveEvent) window.dispatchEvent(new CustomEvent('invite:refresh'));
+    else { refreshPattern(); setCredential({ kind: 'generated' }); }
+  });
+  document.querySelector('.request-plus').addEventListener('click', () => {
+    window.dispatchEvent(new CustomEvent('invite:plus-one', { detail: { id: activeEventId } }));
+  });
+  els.carouselViewport.addEventListener('keydown', event => {
+    if (event.key === 'ArrowRight') goToSlide(currentSlide + 1);
+    if (event.key === 'ArrowLeft') goToSlide(currentSlide - 1);
+  });
+  function setCredential(credential) {
+    clearTimeout(credentialExpiryTimer);
+    const view = document.getElementById('inviteView');
+    view.dataset.credential = credential.kind;
+    const subtitle = view.querySelector('.slide:first-child .invite-sub');
+    let note = document.getElementById('inviteCredentialNote');
+    if (!note) {
+      note = document.createElement('p');
+      note.id = 'inviteCredentialNote';
+      note.className = 'invite-credential-note';
+      note.setAttribute('role', 'status');
+      view.querySelector('.content').appendChild(note);
+    }
+    clearInterval(qrAnimation);
+    if (credential.kind === 'official') {
+      if (!(credential.validForMs > 0)) return setCredential({ kind: 'error', reason: 'This invite expired. Tap refresh to load a new code.' });
+      els.qrImage.innerHTML = credential.svg;
+      els.qrImage.querySelector('svg')?.setAttribute('data-corners', 'square');
+      els.profilePhoto.hidden = true;
+      subtitle.textContent = 'Official Doorlist invite';
+      note.textContent = 'Live admission code from Doorlist. Refreshes automatically.';
+      credentialExpiryTimer = setTimeout(() => {
+        setCredential({ kind: 'loading' });
+        window.dispatchEvent(new CustomEvent('invite:refresh'));
+      }, Math.max(0, credential.validForMs - 100));
+    } else if (credential.kind === 'generated') {
+      buildQrPattern();
+      buildRequestQrPattern();
+      els.profilePhoto.hidden = false;
+      subtitle.textContent = 'Preview · Not valid for entry';
+      note.textContent = credential.reason ? `${credential.reason} Generated preview only; this does not grant event access.` : 'Generated preview only. This code is not valid for event entry.';
+    } else {
+      els.qrImage.textContent = credential.kind === 'loading' ? 'Loading invite…' : 'Invite could not load. Tap refresh to try again.';
+      els.profilePhoto.hidden = true;
+      subtitle.textContent = credential.kind === 'loading' ? 'Checking your invite' : 'Invite unavailable';
+      note.textContent = credential.reason || 'Checking the invite available to your Doorlist account.';
+    }
+  }
+  window.InviteView = {
+    show(event, profile, { live = false } = {}) {
+      activeLiveEvent = live;
+      els.settingsBtn.hidden = live;
+      els.patternBtn.hidden = live;
+      const officialLink = document.getElementById('officialEventLink');
+      officialLink.hidden = !live;
+      officialLink.href = live ? event.sourceUrl : '#';
+      clearTimeout(credentialExpiryTimer);
+      buildQrPattern();
+      buildRequestQrPattern();
+      activeEventId = event.id;
+      state.eventName = event.title;
+      state.eventPhoto = event.image || DEFAULT_EVENT_PHOTO;
+      state.personName = profile.name;
+      state.profilePhoto = profile.photo;
+      applyState();
+      setCredential({ kind: live ? 'loading' : 'generated' });
+      goToSlide(0, false);
+    },
+    hide() { clearTimeout(credentialExpiryTimer); closeSheet(); closeMenu(); els.patternDialog.close(); },
+    setCredential,
+    settings: openSheet,
+  };
 
   // ---------- Init ----------
   loadState();

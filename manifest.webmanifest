@@ -1,6 +1,6 @@
 {
-  "name": "Phi Kap Miami \u2014 Invite",
-  "short_name": "Invites",
+  "name": "Doorlist",
+  "short_name": "Doorlist",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

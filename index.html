@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -10,11 +10,22 @@
 <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
 <link rel="icon" type="image/png" href="icon-192.png" />
 <link rel="manifest" href="manifest.webmanifest" />
-<title>Phi Kap Miami — Invite</title>
+<title>Doorlist</title>
+<script>
+// GitHub Pages is the entry point; account connections run on the hosted app.
+if (location.hostname === 'josh-roe.github.io' && location.pathname.startsWith('/Doorlist-UI-Test')) {
+  const destination = new URL('https://doorlist-mobile-josh-roe.fairrose12.chatgpt.site/mobile/');
+  destination.hash = location.hash;
+  location.replace(destination.href);
+}
+</script>
+
 <link rel="stylesheet" href="style.css" />
+<link rel="stylesheet" href="app.css" />
 </head>
 <body>
-  <div class="phone">
+  <main id="appView" class="mobile-app"></main>
+  <section id="inviteView" class="phone" aria-label="Your invitation" hidden>
 
     <!-- App bar: close, event pill, and settings button. -->
     <div class="app-bar" id="appBar">
@@ -31,6 +42,7 @@
       <div class="app-bar-actions" id="actionsMenu" hidden>
         <button class="text-btn" id="patternBtn">Pattern</button>
         <button class="text-btn" id="settingsBtn">Settings</button>
+        <a class="text-btn" id="officialEventLink" target="_blank" rel="noopener noreferrer" hidden>Open Doorlist</a>
       </div>
     </div>
 
@@ -38,7 +50,7 @@
 
     <!-- Main invite card -->
     <div class="content">
-      <div class="carousel-viewport" id="carouselViewport">
+      <div class="carousel-viewport" id="carouselViewport" tabindex="0" aria-label="Invitation cards">
         <div class="carousel-track" id="carouselTrack">
 
           <div class="slide">
@@ -67,7 +79,7 @@
             <div class="invite-card additional-invite">
               <svg class="placeholder-outline" viewBox="0 0 355 412" preserveAspectRatio="none" aria-hidden="true"><rect x="1" y="1" width="353" height="410" rx="24"/></svg>
               <div class="invite-header"><div><div class="person-name">Request +1 Invite</div><div class="invite-sub">Hosts will be notified to review your request</div></div></div>
-              <div class="qr-wrap qr-placeholder" role="img" aria-label="Request an invite">
+              <div class="qr-wrap qr-placeholder" aria-label="Request an invite">
                 <button class="request-plus" aria-label="Request plus one invite">+</button>
               </div>
             </div>
@@ -81,13 +93,13 @@
         <button class="dot add-dot" data-index="1" aria-label="Show more invites"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M6 3v6M3 6h6"/></svg></button>
       </div>
     </div>
-  </div>
+  </section>
 
   <!-- Settings bottom sheet -->
-  <div class="sheet-overlay" id="sheetOverlay">
-    <div class="sheet" id="sheet">
+  <div class="sheet-overlay" id="sheetOverlay" inert>
+    <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
       <div class="sheet-handle"></div>
-      <h2 class="sheet-title">Settings</h2>
+      <h2 id="settingsTitle" class="sheet-title">Settings</h2>
 
       <div class="settings-row">
         <div class="settings-preview">
@@ -142,10 +154,12 @@
   </dialog>
   <dialog id="patternDialog" class="browser-help" aria-labelledby="patternTitle" tabindex="-1">
     <h2 id="patternTitle">Pattern</h2>
-    <div class="settings-field full"><label for="cornerPattern">Corners</label><select id="cornerPattern"><option value="square">Square</option><option value="circle">Circle</option></select></div>
     <div class="settings-field full"><label for="basePattern">Base</label><select id="basePattern"><option value="small">Small</option><option value="large">Large</option></select></div>
     <form method="dialog"><button class="sheet-btn primary">Done</button></form>
   </dialog>
+  <dialog id="actionDialog" class="action-dialog" aria-labelledby="actionTitle"></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script src="script.js"></script>
+  <script type="module" src="app.js"></script>
 </body>
 </html>

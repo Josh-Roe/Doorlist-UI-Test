@@ -1,0 +1,7 @@
+{
+  "supabaseUrl": "https://vbsbqhcvoejkidksqcot.supabase.co",
+  "supabasePublicKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZic2JxaGN2b2Vqa2lka3NxY290Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzE1MTY4OTcsImV4cCI6MjA0NzA5Mjg5N30.vDfKZq8V-X6PET5kcd5JU7iAd8fseG_eykPmV0M58-4",
+  "firebaseProjectId": "doorlist-b6a3f",
+  "firebasePublicApiKey": "AIzaSyA_qJOxzcdSEzpclmFsL8jhz7IUy261LN8",
+  "source": "Doorlist public web client, inspected 2026-10-25"
+}
