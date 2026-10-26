@@ -218,3 +218,17 @@ test('native user-group ID envelopes resolve membership events',async()=>{
  p.firestore=async path=>{assert.equal(path,'eventObjects/member-event');return {fields:{name:{stringValue:'Membership event'}}};};
  assert.equal((await p.groupEvents()).events[0].eventId,'member-event');
 });
+
+test('campus imports are scoped to the signed-in school and public visibility, follow cursors and conceal restricted details',async()=>{
+ const p=provider();p.profile.school='BERK';p.firebase=async()=>'fixture-firebase';let calls=0;
+ p.fetch=async(_url,options)=>{
+  const q=JSON.parse(options.body).structuredQuery;
+  assert.equal(q.where.compositeFilter.filters[0].fieldFilter.value.stringValue,'BERK');
+  assert.equal(q.where.compositeFilter.filters[1].fieldFilter.value.stringValue,'EventVisibility.PUBLIC');
+  calls++;
+  if(calls===2){assert.equal(q.startAt.values[0].referenceValue,'projects/test/documents/eventObjects/event-199');return Response.json([{document:{name:'projects/test/documents/eventObjects/monster-event',fields:{name:{stringValue:'MONSTER MOSH'},hideDetailsIfNotOnList:{booleanValue:true},address:{stringValue:'Hidden'}}}}]);}
+  return Response.json(Array.from({length:200},(_,i)=>({document:{name:`projects/test/documents/eventObjects/event-${i}`,fields:{name:{stringValue:`Event ${i}`}}}})));
+ };
+ const result=await p.campusEvents();assert.equal(calls,2);assert.equal(result.events.length,201);assert.equal(result.partial,false);
+ assert.equal(result.events.at(-1).name,'MONSTER MOSH');assert.equal(result.events.at(-1).address,undefined);
+});

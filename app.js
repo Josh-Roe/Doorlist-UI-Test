@@ -146,7 +146,7 @@ document.addEventListener('playing',event=>{
 },true);
 const motionPreference=matchMedia('(prefers-reduced-motion: reduce)');
 function updateConfettiPlayback() {
-  document.documentElement.style.setProperty('--avatars-play-state',document.hidden?'paused':'running');
+  document.querySelectorAll('.avatar-stack').forEach(stack=>stack.style.setProperty('--avatars-play-state',document.hidden||!stack.dataset.inView?'paused':'running'));
   document.querySelectorAll('.confetti-video,.template-video').forEach(video=>{
     if(document.hidden || motionPreference.matches || app.hidden || (video.matches('.template-video')&&!video.dataset.inView))video.pause();
     else video.play().catch(()=>{});
@@ -161,7 +161,7 @@ function bindTemplateMotion() {
     for(const entry of entries){const video=entry.target;if(entry.isIntersecting)video.dataset.inView='true';else delete video.dataset.inView;}
     updateConfettiPlayback();
   },{rootMargin:'120px'});
-  document.querySelectorAll('.template-video').forEach(video=>templateVideoObserver.observe(video));
+  document.querySelectorAll('.template-video,.avatar-stack').forEach(target=>templateVideoObserver.observe(target));
   updateConfettiPlayback();
 }
 function eventRow(event) {

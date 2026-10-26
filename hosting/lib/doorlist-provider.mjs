@@ -138,7 +138,7 @@ export class DoorlistProvider {
     this.setSession(session);
     const user = await this.api(`/api/users/phone/${obfuscatePhone(phone)}`);
     if (!user.uuid || !user.name) { this.clear(); throw new ProviderError('An existing Doorlist account is required.', 404); }
-    this.profile = { id: user.uuid, name: String(user.name), photo: safeImage(user.profilePicture) || 'profile.png' };
+    this.profile = { id: user.uuid, name: String(user.name), photo: safeImage(user.profilePicture) || 'profile.png',school:String(user.school||'') };
     this.rememberProfiles([this.profile]);
     return this.profile;
   }
@@ -189,6 +189,7 @@ export class DoorlistProvider {
       this.api('/api/events/trending'),
       this.api(`/api/events/profile/${encodeURIComponent(this.profile.id)}?token=${encodeURIComponent(token)}`),
       this.groupEvents(),
+      this.campusEvents(),
     ]);
     const own = results[0];
     // A denied or failed account feed must not quietly turn into an empty successful import.
@@ -199,7 +200,7 @@ export class DoorlistProvider {
       if (result.status !== 'fulfilled') continue;
       const rows = result.value.events || result.value.lightEvents || [];
       for (const raw of rows) {
-        const event = normalizeEvent(raw, i === 0 || i >= 4 || raw.type === 'own' ? 'invited' : 'discover');
+        const event = normalizeEvent(raw, i === 0 || i === 4 || i === 5 || raw.type === 'own' ? 'invited' : 'discover');
         if (!event || raw.isCancelled || raw.isCanceled || (event.endsAt && new Date(event.endsAt).getTime() <= this.clock())) continue;
         const previous = merged.get(event.id);
         const access = previous?.access === 'invited' ? 'invited' : event.access;
@@ -224,10 +225,33 @@ export class DoorlistProvider {
     this.suggestedFriends=suggestedFriends;this.syncedAt=new Date(this.clock()).toISOString();this.coverage={
       invited: events.filter(event => event.access === 'invited').length,
       discoverable: events.filter(event => event.access === 'discover').length,
-      eligibleEventCount: eligible, limited, partial: limited || results.some(result => result.status === 'rejected'),
-      sources:Object.fromEntries(['account','friends','home','trending','profile','groups'].map((name,index)=>{const result=results[index];return [name,result.status==='fulfilled'?{count:(result.value.events||result.value.lightEvents||[]).length}:{count:0,status:result.reason.status||502}];})),
+      eligibleEventCount: eligible, limited, partial: limited || results.some(result => result.status === 'rejected'||result.value?.partial),
+      sources:Object.fromEntries(['account','friends','home','trending','profile','groups','campus'].map((name,index)=>{const result=results[index];return [name,result.status==='fulfilled'?{count:(result.value.events||result.value.lightEvents||[]).length,partial:Boolean(result.value.partial)}:{count:0,status:result.reason.status||502}];})),
     };
     return this.snapshot();
+  }
+  async campusEvents() {
+    if(!this.profile.school) {
+      const user=await this.api(`/api/users/uuid/${encodeURIComponent(this.profile.id)}`);
+      this.profile.school=String(user.school||'NONE');
+    }
+    if(!/^[A-Z0-9]{2,12}$/.test(this.profile.school)||this.profile.school==='NONE')return {events:[]};
+    const token=await this.firebase(),events=[];let last=null,more=false;
+    for(let page=0;page<20;page++) {
+      const query={from:[{collectionId:'eventObjects'}],where:{compositeFilter:{op:'AND',filters:[
+        {fieldFilter:{field:{fieldPath:'school'},op:'EQUAL',value:{stringValue:this.profile.school}}},
+        {fieldFilter:{field:{fieldPath:'visibility'},op:'EQUAL',value:{stringValue:'EventVisibility.PUBLIC'}}},
+      ]}},orderBy:[{field:{fieldPath:'__name__'},direction:'ASCENDING'}],limit:200,
+        ...(last?{startAt:{values:[{referenceValue:last}],before:false}}:{})};
+      const response=await this.request(`https://firestore.googleapis.com/v1/projects/${this.config.firebaseProjectId}/databases/(default)/documents:runQuery`,{
+        method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({structuredQuery:query}),
+      });
+      const docs=(Array.isArray(response)?response:[]).filter(row=>row.document).map(row=>row.document);
+      for(const doc of docs){const raw=decodeFields(doc.fields);if(raw.hideDetailsIfNotOnList){delete raw.location;delete raw.locationReadable;delete raw.locationName;delete raw.address;raw.description='';}events.push({...raw,eventId:doc.name.split('/').at(-1)});}
+      more=docs.length===200;
+      const next=docs.at(-1)?.name;if(!more||!next||next===last)break;last=next;
+    }
+    return {events,partial:more};
   }
   async groupEvents() {
     const result=await this.api(`/api/users/groups/${encodeURIComponent(this.profile.id)}`);

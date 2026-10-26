@@ -90,6 +90,7 @@
     svg.setAttribute('height', '100%');
     svg.innerHTML = `<rect width="702" height="704" fill="#fff"/>`;
     svg.dataset.corners = 'square';
+    svg.dataset.pattern = state.basePattern;
     svg.innerHTML += `<defs><clipPath id="fixed-finders"><rect x="28" y="26" width="130" height="127"/><rect x="552" y="26" width="123" height="127"/><rect x="28" y="551" width="130" height="128"/></clipPath></defs><image href="qr.svg" width="702" height="704" clip-path="url(#fixed-finders)"/>`;
     const connections = document.createElementNS(ns, 'g');
     connections.setAttribute('stroke', '#000');
@@ -412,8 +413,8 @@
   function showGeneratedInvite() {
     const view = document.getElementById('inviteView');
     view.dataset.credential = 'generated';
-    buildQrPattern();
-    buildRequestQrPattern();
+    if(els.qrImage.querySelector('svg')?.dataset.pattern!==state.basePattern)buildQrPattern();
+    if(document.querySelector('.qr-placeholder > svg')?.dataset.pattern!==state.basePattern)buildRequestQrPattern();
     els.profilePhoto.hidden = false;
     view.querySelector('.slide:first-child .invite-sub').textContent = 'Your invite';
   }
