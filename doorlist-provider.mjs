@@ -58,7 +58,8 @@ function obfuscatePhone(phone) {
 }
 export class DoorlistProvider {
   constructor({ fetchImpl = fetch, config = publishedConfig, clock = Date.now } = {}) {
-    this.fetch = fetchImpl; this.config = config; this.clock = clock; this.allowedEvents = new Map();
+    // Keep native fetch unbound to this provider; Workers requires its global receiver.
+    this.fetch = (...args) => fetchImpl(...args); this.config = config; this.clock = clock; this.allowedEvents = new Map();
   }
   async request(url, options = {}) {
     let response;
@@ -80,6 +81,10 @@ export class DoorlistProvider {
     return data;
   }
   authHeaders() { return { apikey: this.config.supabasePublicKey, 'Content-Type': 'application/json' }; }
+  async checkConnection() {
+    await this.request(`${this.config.supabaseUrl}/auth/v1/health`, { headers: this.authHeaders() });
+    return true;
+  }
   async sendCode(phone) {
     await this.request(`${this.config.supabaseUrl}/auth/v1/otp`, {
       method: 'POST', headers: this.authHeaders(), body: JSON.stringify({ phone, create_user: false, channel: 'sms' }),

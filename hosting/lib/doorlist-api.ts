@@ -76,7 +76,10 @@ export async function handleDoorlist(request:Request,env:Runtime) {
     if(request.method==='POST'&&(request.headers.get('Origin')!==url.origin||request.headers.get('X-Doorlist-Client')!=='mobile-ui'||!request.headers.get('Content-Type')?.startsWith('application/json')))return reply({error:'Open this app to make this request.'},403);
     const fetchSite=request.headers.get('Sec-Fetch-Site');
     if(request.method==='GET'&&fetchSite&&!['same-origin','none'].includes(fetchSite))return reply({error:'Cross-site access is not allowed.'},403);
-    if(url.pathname==='/api/health')return reply({ready:Boolean(env.SESSION_ENCRYPTION_KEY),service:'doorlist-mobile'});
+    if(request.method==='GET'&&url.pathname==='/api/health') {
+      const doorlistReachable=await new DoorlistProvider().checkConnection();
+      return reply({ready:Boolean(env.SESSION_ENCRYPTION_KEY),service:'doorlist-mobile',doorlistReachable});
+    }
     session=await getSession(request,env);
     if(request.method==='GET'&&url.pathname==='/api/session')return reply({authenticated:Boolean(session?.provider.profile),profile:session?.provider.profile||null});
     if(request.method==='POST'&&url.pathname==='/api/auth/code') {

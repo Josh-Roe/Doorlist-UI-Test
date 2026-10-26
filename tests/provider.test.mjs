@@ -98,3 +98,18 @@ test('upstream fetch uses Worker-compatible manual redirects without forwarding 
   await assert.rejects(p.request('https://doorlist.app/api/test'), /unexpected redirect/);
   assert.equal(redirectMode,'manual');
 });
+
+// A strict native-style function reproduces Workers' receiver requirement in Node.
+test('network function retains its global receiver and health checks never send SMS', async () => {
+  let calls=0;
+  const p=new DoorlistProvider({fetchImpl:async function(url,options) {
+    assert.equal(this,undefined);
+    assert.ok(url.endsWith('/auth/v1/health'));
+    assert.ok(!options.method || options.method==='GET');
+    assert.equal(options.body,undefined);
+    calls++;
+    return Response.json({version:'test'});
+  }});
+  assert.equal(await p.checkConnection(),true);
+  assert.equal(calls,1);
+});
