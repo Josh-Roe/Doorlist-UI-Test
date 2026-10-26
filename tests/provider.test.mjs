@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DoorlistProvider, ProviderError, decodeFields, normalizeEvent, normalizeStatus } from '../doorlist-provider.mjs';
+import { DoorlistProvider, ProviderError, decodeFields, normalizeEvent, normalizeStatus, normalizeLocation } from '../doorlist-provider.mjs';
 const now = Date.parse('2026-10-25T12:00:00Z');
 const raw = (id, extra = {}) => ({ eventId: id, name: id, time: now + 3600000, endTime: now + 7200000, ...extra });
 function provider() {
@@ -132,4 +132,20 @@ test('guest photo aliases are normalized and unsafe photo URLs are rejected', as
   const result=await p.loadGuests('event-photos');
   assert.equal(result.guests[0].photo,'https://images.example/photo.jpg');
   assert.equal(result.guests[1].photo,'');
+});
+
+test('structured Doorlist addresses become a street label and complete map address',()=>{
+  assert.deepEqual(normalizeLocation({streetNumber:2647,street:'Durant Avenue',city:'Berkeley',state:'CA'}),{location:'2647 Durant Avenue',locationAddress:'2647 Durant Avenue, Berkeley, CA'});
+  assert.equal(normalizeEvent(raw('event-location',{location:{nickname:'The Courtyard'}})).location,'The Courtyard');
+});
+test('guest pages expose an event-bound cursor and resolve photos by account ID',async()=>{
+  const p=provider();p.allowedEvents.set('event-paged',{});
+  let seen;
+  p.firestore=async(path,query)=>{seen={path,query};return {documents:[{name:'guests/account-one',fields:{name:{stringValue:'Guest One'}}}],nextPageToken:'page-two'};};
+  p.api=async(_path,options)=>{assert.deepEqual(JSON.parse(options.body).uuids,['account-one']);return {'account-one':{profilePictureUrl:'https://images.example/correct-account.jpg'}};};
+  const result=await p.loadGuests('event-paged',{cursor:'page-one',pageLimit:1,enrichPhotos:true});
+  assert.equal(result.nextPageToken,'page-two');assert.equal(result.partial,true);
+  assert.ok(seen.path.includes('event-paged/guests'));assert.ok(seen.query.includes('pageToken=page-one'));
+  assert.equal(result.guests[0].photo,'https://images.example/correct-account.jpg');
+  await assert.rejects(p.loadGuests('other-event',{cursor:'page-one'}),error=>error.status===404);
 });

@@ -27,7 +27,7 @@ The server uses the SMS authentication flow and account endpoints observed in Do
 
 Your events merges the account's invited events, friends' events, recently available feed events, and discoverable events returned by Doorlist. It removes duplicate and ended events, sorts by date, and preserves **Invited** versus **Discover** labels. Discoverability does not imply an admission invitation. A partial or limited upstream feed is identified rather than presented as a complete successful import.
 
-Each imported event opens its details and guest list when Doorlist permits access. If the guest list is denied or cannot load, the app automatically generates a stable preview of fictional people, labeled **Generated guest preview**. Preview counts are not presented as actual attendance. Large real lists render in batches of 50 with lazy-loaded photos; the list indicates if Doorlist's response was partial. An accessible empty list remains empty, and an expired account session requires signing in again. RSVP, purchases, access requests, and +1 submissions open the official Doorlist event; this app does not silently perform those account changes.
+Each imported event opens its details and guest list when Doorlist permits access. If the guest list is denied or cannot load, the app automatically generates a stable preview of fictional people, identified by the guest-list source footer. Preview counts are not presented as actual attendance. Large real lists render in batches of 50 with lazy-loaded photos; the list indicates if Doorlist's response was partial. An accessible empty list remains empty, and an expired account session requires signing in again. RSVP, purchases, access requests, and +1 submissions open the official Doorlist event; this app does not silently perform those account changes.
 
 The ticket screen always uses the generated QR artwork, including for events with accessible admission tickets. It does not request or display official ticket payloads. The main design retains square corner markers and the +1 design retains circular markers. The home screen omits the connection badge, sync status banner, and connection footer; sign-in and manual event refresh remain available from Profile.
 
@@ -35,9 +35,9 @@ Account sessions and imported events are held in server/browser memory. The brow
 
 ## Native-style UI
 
-Home follows the observed Doorlist section order: Coming up, Your events, Sway advertisement, Suggested friends, and Get people together. The duplicate Discover list is omitted. Suggested people, attendee circles, and host photos use account-authorized Doorlist responses; unavailable photos use local profile artwork. The Sway card opens the [official ballot-party offer](https://www.sway.co/ballot-party). Event-template and friend actions open Doorlist for the actual account action.
+Home follows the observed Doorlist section order: a swipeable Coming up event carousel, the Your events poster-stack hosting tile, Sway advertisement, Suggested friends, and Get people together. The duplicate Discover list is omitted. Suggested people, attendee circles, and host photos use account-authorized Doorlist responses; unavailable photos use local profile artwork. The Sway card opens the [official ballot-party offer](https://www.sway.co/ballot-party). Event-template and friend actions open Doorlist for the actual account action.
 
-Navigation uses push/back transitions for event pages, slide-up presentation for generated QR screens, and crossfades for tabs. The event background uses Doorlist’s published Purple Confetti video. Reduced motion pauses video playback and disables transitions. Floating controls use translucent blur, saturation, edge highlights, and press feedback informed by [Apple's materials guidance](https://developer.apple.com/design/human-interface-guidelines/materials). This is a web recreation, not the native system Liquid Glass renderer. The template-card illustrations are recreated artwork rather than the native image assets.
+Navigation uses push/back transitions for event pages, slide-up presentation for generated QR screens, and crossfades for tabs. The event background uses Doorlist’s published Purple Confetti video. Reduced motion pauses video playback and disables transitions. Floating controls use translucent blur, saturation, edge highlights, and press feedback informed by [Apple's materials guidance](https://developer.apple.com/design/human-interface-guidelines/materials). This is a web recreation, not the native system Liquid Glass renderer. The six native Get people together card designs are retained as local static images captured from the user-provided native reference; the full reference captures stay outside source control.
 
 ## Source structure
 
@@ -45,6 +45,7 @@ Navigation uses push/back transitions for event pages, slide-up presentation for
 | --- | --- |
 | `server.mjs` | Local HTTP server, SMS sign-in, session and origin boundaries, allowlisted API routes |
 | `doorlist-provider.mjs` | Doorlist account/event requests, normal user-authenticated Firestore reads, pagination, QR encoding |
+| `guest-list.js` | Pinned self row and stable RSVP-response ordering |
 | `avatar.js` | Local profile-image fallback artwork and safe photo selection |
 | `event-store.js` | Connected browser repository, loading/error state, refresh and disconnect |
 | `demo-store.js` | Explicitly selected sample UI and its local customization |

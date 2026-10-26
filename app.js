@@ -1,5 +1,6 @@
 import { eventStore } from './event-store.js';
 import { avatarFallback, profileImage } from './avatar.js';
+import { orderedGuests } from './guest-list.js';
 
 const app = document.getElementById('appView');
 const invite = document.getElementById('inviteView');
@@ -10,11 +11,15 @@ const icons = {
   next: '<path d="m9 5 7 7-7 7"/>',
   search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/>',
   home: '<path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/>',
-  bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/>',
-  user: '<circle cx="12" cy="7" r="4"/><path d="M4 22v-3a8 8 0 0 1 16 0v3"/>',
+  bell: '<g transform="rotate(-18 12 12)"><path d="M18 9a6 6 0 0 0-12 0v3c0 2-1.2 3.5-2.5 4.6-.6.5-.3 1.4.5 1.4h16c.8 0 1.1-.9.5-1.4C19.2 15.5 18 14 18 12V9Z"/><path d="M10 21c.5 1 3.5 1 4 0M3 6l-1 3m19-3 1 3"/></g>',
+  user: '<circle cx="12" cy="6.5" r="3.5"/><path d="M4.5 21v-1.5c0-4 3-6.5 7.5-6.5s7.5 2.5 7.5 6.5V21"/>',
   plus: '<path d="M12 4v16M4 12h16"/>',
   people: '<circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2M17 5a3 3 0 0 1 0 6m2 9v-2a6 6 0 0 0-2-4"/>',
-  qr: '<path d="M3 3h6v6H3zM15 3h6v6h-6zM3 15h6v6H3zM15 15h2v2h-2zM19 15h2v6h-2zM15 19h2v2h-2z"/>',
+  qr: '<path fill="currentColor" stroke="none" fill-rule="evenodd" d="M3 3h7v7H3V3Zm2 2v3h3V5H5Zm9-2h7v7h-7V3Zm2 2v3h3V5h-3ZM3 14h7v7H3v-7Zm2 2v3h3v-3H5Z"/><path fill="currentColor" stroke="none" d="M14 14h3v3h-3zm5 0h2v2h-2zm-5 5h2v2h-2zm4-1h3v3h-3z"/>',
+  thumb: '<path fill="currentColor" stroke="none" d="M8.7 9.3 11 3.1c.3-.8 1.1-1.2 1.8-1 .8.2 1.3.9 1.2 1.7l-.5 4.5h4.1c2.1 0 3.1 1.2 2.6 3.1l-1.7 6.4c-.4 1.4-1.4 2.2-3 2.2h-3.6c-1.7 0-3.2-.8-3.2-2.5V9.3ZM3.5 9.2H7V21H3.5c-.9 0-1.5-.6-1.5-1.5v-8.8c0-.9.6-1.5 1.5-1.5Z"/>',
+  spotify: '<circle cx="12" cy="12" r="10" fill="currentColor" stroke="none"/><g stroke="#07041b" stroke-width="1.6" fill="none"><path d="M6.5 9c3.5-1 7.5-.7 11 1M7.2 12.3c3-.9 6.3-.5 9.2.9m-8.5 2.3c2.5-.6 5-.3 7.5.8"/></g>',
+  arrowUpRight: '<path d="M13 4h7v7m0-7L10 14M9 6H5v14h14v-4"/>',
+  playlist: '<path d="M9 17V4l12-2v13M9 7l12-2"/><ellipse cx="6" cy="18" rx="3" ry="2"/><ellipse cx="18" cy="16" rx="3" ry="2"/>',
   share: '<path d="M12 16V2m-5 5 5-5 5 5M5 11H3v11h18V11h-2"/>',
   calendar: '<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M7 2v6m10-6v6M3 11h18"/>',
   pin: '<path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/>',
@@ -30,7 +35,12 @@ const statusLabel = status => ({going:'Going',maybe:'Maybe','not-going':'Not goi
 let currentRoute = '';
 let guestFilter = 'all';
 let guestQuery = '';
-let guestVisibleCount = 50;
+const GUEST_BATCH_SIZE=60;
+let guestVisibleCount = GUEST_BATCH_SIZE;
+let guestObserver;
+let guestBatchLoading=false;
+let guestBatchError='';
+let activeHeroId=null;
 let toastTimer;
 let phoneHint = '';
 const hydrating = new Set();
@@ -67,7 +77,7 @@ document.addEventListener('error', event => {
   image.src=avatarFallback(image.dataset.avatarId,image.dataset.avatarName);
 },true);
 function poster(event) {
-  if (event.image && event.image !== 'event.png') return `<img class="uploaded-poster" src="${esc(event.image)}" alt="">`;
+  if (event.image && event.image !== 'event.png') return `<img class="uploaded-poster" loading="lazy" decoding="async" src="${esc(event.image)}" alt="">`;
   return `<div class="event-art art-${esc(event.theme)}" aria-hidden="true"><span class="art-orbit orbit-one"></span><span class="art-orbit orbit-two"></span><div class="poster-copy"><small>${esc(event.host)} PRESENTS</small><strong>${esc(event.title)}</strong><span>${esc(dateParts(event).full)} · ${esc(dateParts(event).time)}</span></div><span class="poster-star star-one">✦</span><span class="poster-star star-two">✦</span></div>`;
 }
 function eventCard(event, featured = false) {
@@ -88,10 +98,12 @@ function empty(title, message, symbol = 'search') {
   return `<div class="empty-state">${icon(symbol)}<h2>${esc(title)}</h2><p>${esc(message)}</p></div>`;
 }
 const gatheringTemplates = [
-  {id:'warm-up',title:'THE WARM UP',description:'Grab the crew for a pregame',emoji:'🪩',theme:'warm-up'},
-  {id:'birthday',title:'Birthday Party',description:"Celebrate you or your friend's bday",emoji:'🎂',theme:'birthday'},
-  {id:'sunday',title:'Sunday Funday',description:'Your weekend, one more time',emoji:'☀️',theme:'sunday'},
-  {id:'dinner',title:'Dinner Party',description:'Good food, better company',emoji:'🍝',theme:'dinner'},
+  {id:'warm-up',title:'THE WARM UP',description:'Grab the crew for a pregame',image:'assets/doorlist-warm-up.png'},
+  {id:'birthday',title:'Birthday Party',description:"Celebrate you or your friend's bday",image:'assets/doorlist-birthday.png'},
+  {id:'sunday-scaries',title:'Sunday Scaries',description:"You know the drill—let’s fight this together",image:'assets/doorlist-sunday-scaries.png'},
+  {id:'study-sesh',title:'Study Sesh',description:"Time to lock in—let’s get those A’s",image:'assets/doorlist-study-sesh.png'},
+  {id:'bar-crawl',title:'BAR CRAWL',description:'Set the record for most bar stops',image:'assets/doorlist-bar-crawl.png'},
+  {id:'watch-party',title:'Watch Party',description:"You're gonna wanna see this!",image:'assets/doorlist-watch-party.png'},
 ];
 function swayAdvertisement() {
   return `<section class="sway-ad" aria-label="Sway advertisement"><div class="sway-ad-top"><span class="sway-wordmark"><svg viewBox="0 0 24 28" aria-hidden="true"><path d="M2 2h21L13 13h9v13H1l10-11H2Z" fill="currentColor" stroke="none"/></svg>Sway</span><span class="sway-status"><i></i>Applications open</span></div><h2>Throw a ballot party.<br><span>Sway covers up to $500.</span></h2><a href="https://www.sway.co/ballot-party" target="_blank" rel="noopener noreferrer" class="sway-apply">Apply to host ${icon('next')}</a><p>External offer · Nonpartisan · closes Oct 31</p></section>`;
@@ -101,16 +113,19 @@ function suggestedFriendsSection() {
   return `<section class="home-section suggested-friends"><div class="section-heading"><h2>Suggested friends</h2><button data-action="add-friends">Add Friends ${icon('next')}</button></div>${friends.length ? `<div class="friends-rail">${friends.map(person=>`<button class="friend-suggestion" data-action="friend-profile" data-id="${esc(person.id)}" aria-label="Open ${esc(person.name)}"><span class="friend-photo">${avatar(person)}<span class="friend-add">${icon('plus')}</span></span><strong>${esc(person.name)}</strong><small>${person.mutualFriends ? `${person.mutualFriends} mutual friends` : person.mutualEvents ? `${person.mutualEvents} mutual events` : 'People you may know'}</small></button>`).join('')}</div>` : `<button class="find-friends-card" data-action="add-friends">${icon('people')}Find your people ${icon('next')}</button>`}</section>`;
 }
 function gatheringSection() {
-  return `<section class="home-section gathering-section"><h2>Get people together!</h2><p>Tap to make an event</p><div class="gathering-rail">${gatheringTemplates.map(template=>`<button class="gathering-card gathering-${template.theme}" data-action="event-template" data-template="${template.id}"><span class="template-emoji">${template.emoji}</span><span class="template-art" aria-hidden="true"><i></i><i></i><i></i></span><span class="template-copy"><strong>${template.title}</strong><span>${template.description}</span></span></button>`).join('')}</div></section>`;
+  return `<section class="home-section gathering-section"><h2>Get people together!</h2><p>Tap to make an event</p><div class="gathering-rail">${gatheringTemplates.map(template=>`<button class="gathering-card" data-action="event-template" data-template="${template.id}" aria-label="${esc(template.title)}. ${esc(template.description)}"><img class="native-template-art" loading="lazy" src="${template.image}" alt=""></button>`).join('')}</div></section>`;
+}
+function hostTile(events) {
+  return `<button class="host-card" data-action="create"><span class="host-art poster-stack" aria-hidden="true">${events.slice(0,3).map(event=>`<span class="mini-poster">${poster(event)}</span>`).join('')}${events.length?'':icon('calendar')}</span><strong>Become a Host</strong><span>Host and invite your friends!</span></button>`;
 }
 function home() {
-  const events = eventStore.listEvents();
-  const featured = events.find(event=>event.rsvp === 'going') || events.find(event=>event.access === 'invited') || events[0];
+  const events=eventStore.listEvents();
+  const featured=events.find(event=>event.rsvp==='going') || events.find(event=>event.access==='invited') || events[0];
+  const slides=featured?[featured,...events.filter(event=>event.id!==featured.id)]:[];
   return `<div class="home-view"><header class="home-header"><h1 class="wordmark">doorlist</h1><div class="header-actions"><a href="#/search" class="glass-button" aria-label="Search events">${icon('search')}</a></div></header>
-    ${connectionPanel()}<section class="home-section coming-up"><h2>Coming up!</h2>${featured ? eventCard(featured,true) : empty('Nothing coming up','Your next invite will show up here.','calendar')}</section>
-    <section class="home-section your-events"><a class="section-heading" href="#/events"><h2>Your events</h2>${icon('next')}</a><div class="event-rail">${events.map(event=>eventCard(event)).join('')}<button class="host-card" data-action="create"><span class="host-art">${icon('plus')}</span><strong>Become a Host</strong><span>Host and invite your friends!</span></button></div></section>
-    ${swayAdvertisement()}${suggestedFriendsSection()}${gatheringSection()}
-    ${nav()}</div>`;
+    ${connectionPanel()}<section class="home-section coming-up"><h2>Coming up!</h2>${slides.length?`<div class="coming-up-rail" aria-label="Upcoming events" tabindex="0">${slides.map(event=>eventCard(event,true)).join('')}</div>`:empty('Nothing coming up','Your next invite will show up here.','calendar')}</section>
+    <section class="home-section your-events"><a class="section-heading" href="#/events"><h2>Your events</h2>${icon('next')}</a><div class="hosting-rail">${hostTile(events)}</div></section>
+    ${swayAdvertisement()}${suggestedFriendsSection()}${gatheringSection()}${nav()}</div>`;
 }
 function confettiBackground() {
   const reduceMotion=matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -139,23 +154,61 @@ function eventPage(event) {
   return `<div class="event-view theme-${esc(event.theme)}">${confettiBackground()}${topbar('/', '', `<button class="glass-button" data-action="event-menu" data-id="${event.id}" aria-label="Event options">${icon('more')}</button>`)}
     <h1 class="event-title">${esc(event.title)}</h1><div class="detail-poster">${poster(event)}</div>
     <a class="guest-summary glass-panel" href="#/event/${event.id}/guests">${avatarStack(event)}<span><strong>${event.guestListGenerated ? 'Preview Guest List' : 'Guest List'}</strong><small>${event.guestListGenerated ? 'Generated sample people' : event.source === 'doorlist' && !event.guestsLoaded ? 'See who’s going' : `${going} going`}</small></span><span class="see-all">See All ${icon('next')}</span></a>
-    <section class="event-info"><div class="info-line"><span class="info-icon">${icon('calendar')}</span><div><span>Date</span><strong>${date.full}</strong><p>${date.time} – ${date.endTime}</p></div></div><div class="info-line"><span class="info-icon">${icon('pin')}</span><div><span>Location</span><strong>${esc(event.location)}</strong></div></div><div class="info-line">${hostAvatar(event)}<div><span>Hosted by</span><strong>${esc(event.host)}</strong></div></div></section>
+    <section class="event-info"><div class="info-line"><span class="info-icon">${icon('calendar')}</span><div><span>Date</span><strong>${date.full}</strong><p>${date.time} – ${date.endTime}</p></div></div><div class="info-line">${hostAvatar(event)}<div><span>Hosted by</span><strong>${esc(event.host)}</strong></div></div><div class="info-line"><span class="info-icon">${icon('pin')}</span><div><span>Location</span><strong>${esc(event.location)}</strong>${event.locationAddress?`<a class="location-link" href="https://maps.apple.com/?q=${encodeURIComponent(event.locationAddress)}" target="_blank" rel="noopener noreferrer">${esc(event.locationAddress)}</a>`:''}</div></div></section>
     <section class="about-event"><h2>About this event</h2><p>${esc(event.description)}</p></section>
+    ${sharedPlaylistSection(event)}
     <nav class="event-dock" aria-label="Event actions"><button data-action="rsvp" data-id="${event.id}"><span class="event-dock-button">🔥</span><span>RSVP</span></button><button class="share-action" data-action="share" data-id="${event.id}"><span class="event-dock-button">${icon('share')}</span><span>Share</span></button><a href="#/event/${event.id}/invite"><span class="event-dock-button">${icon('qr')}</span><span>Tickets</span></a></nav></div>`;
 }
+function sharedPlaylistSection(event) {
+  return `<section class="shared-playlist"><h2>${icon('spotify')}Shared Playlist</h2><div class="playlist-actions"><button data-action="playlist-add" data-id="${event.id}">${icon('plus')}Add a Song</button>${event.playlist?.url?`<a href="${esc(event.playlist.url)}" target="_blank" rel="noopener noreferrer">${icon('arrowUpRight')}Open Playlist</a>`:`<button disabled>${icon('arrowUpRight')}Open Playlist</button>`}</div></section>`;
+}
 function guestListPage(event) {
-  guestFilter = 'all'; guestQuery = ''; guestVisibleCount = 50;
+  guestFilter = 'all'; guestQuery = ''; guestVisibleCount = GUEST_BATCH_SIZE; guestBatchError='';
   return `<div class="guest-list-view">${topbar(`/event/${event.id}`)}<h1 class="sr-only">${esc(event.title)} guest list</h1><div class="guest-controls"><div class="segmented-control" role="group" aria-label="Filter guests">${[['all','All'],['going','Going'],['maybe','Maybe']].map(([id,label])=>`<button data-action="guest-filter" data-filter="${id}" aria-pressed="${id==='all'}">${label}</button>`).join('')}</div><label class="search-field">${icon('search')}<input id="guestSearch" type="search" placeholder="Search Guests" aria-label="Search guests" autocomplete="off"></label></div><div id="guestResults" class="guest-results" aria-live="polite">${guestRows(event)}</div><p class="preview-note">${guestSourceNote(event)}</p></div>`;
+}
+function guestCandidates(event) {
+  return orderedGuests(event.guests,eventStore.getProfile()).filter(person=>{
+    const answered=['going','maybe','not-going'].includes(person.status);
+    return (!event.guestListNextCursor || answered || guestFilter!=='all') &&
+      (guestFilter==='all'||person.status===guestFilter) && person.name.toLowerCase().includes(guestQuery.toLowerCase());
+  });
 }
 function guestRows(event) {
   if (!event) return empty('Sign in to view guests', 'Reconnect your Doorlist account.', 'people');
   const profile = eventStore.getProfile();
   if (event.source === 'doorlist' && !event.guestsLoaded) return empty('Loading guests', 'Checking the guest list available to your account.', 'people');
   if (event.guestListRestricted && !event.guestListGenerated) return empty('Guest list unavailable', 'Doorlist has not granted access to this guest list.', 'people');
-  const guests = event.source === 'doorlist' ? event.guests : [{id:'you',name:profile.name,status:event.rsvp,photo:profile.photo}, ...event.guests];
-  const filtered = guests.filter(guest=>(guestFilter==='all' || guest.status===guestFilter) && guest.name.toLowerCase().includes(guestQuery.toLowerCase()));
-  const notice = event.guestListGenerated ? '<div class="generated-guest-notice" role="note"><strong>Generated guest preview</strong><span>These are sample people. The real guest list is unavailable.</span></div>' : '';
-  return notice + (filtered.length ? `<ul class="guest-list">${filtered.slice(0,guestVisibleCount).map(guest=>`<li class="guest-row">${avatar(guest)}<span class="guest-name">${esc(guest.name)}${guest.id==='you' ? '' : `<span class="guest-heart" aria-hidden="true">${icon('heart')}</span>`}</span><span class="guest-status guest-status-${guest.status}" aria-label="${statusLabel(guest.status)}">${guest.status==='going' ? '👍' : guest.status==='maybe' ? '?' : guest.status==='not-going' ? '−' : '·'}</span></li>`).join('')}</ul>${filtered.length > guestVisibleCount ? `<button class="text-action" data-action="guest-more">Show more guests (${guestVisibleCount} of ${filtered.length})</button>` : ''}` : empty('No guests found','Try a different name or filter.'));
+  const filtered=guestCandidates(event);
+  const more=filtered.length>guestVisibleCount || event.guestListNextCursor;
+  return (filtered.length?`<ul class="guest-list">${filtered.slice(0,guestVisibleCount).map(guest=>`<li class="guest-row" data-guest-id="${esc(guest.id)}" ${guest.isSelf?'data-self="true"':''}>${avatar(guest)}<span class="guest-name">${esc(guest.name)}${guest.isSelf?'':`<span class="guest-heart" aria-hidden="true">${icon('heart')}</span>`}</span><span class="guest-status guest-status-${guest.status}" aria-label="${statusLabel(guest.status)}">${guest.status==='going'?icon('thumb'):guest.status==='maybe'?'?':guest.status==='not-going'?'−':'·'}</span></li>`).join('')}</ul>`:empty('No guests found','Try a different name or filter.')) + (more?`<div id="guestListSentinel" data-event-id="${esc(event.id)}" class="guest-list-sentinel" role="status">${guestBatchError?`<span>${esc(guestBatchError)}</span><button data-action="guest-retry">Try again</button>`:'<span class="guest-loading-dot" aria-hidden="true"></span><span class="sr-only">Loading more guests</span>'}</div>`:'');
+}
+function bindGuestScroll() {
+  guestObserver?.disconnect();
+  const sentinel=document.getElementById('guestListSentinel');
+  if(!sentinel || guestBatchError)return;
+  guestObserver=new IntersectionObserver(entries=>{
+    if(entries.some(entry=>entry.isIntersecting))loadNextGuestBatch(sentinel.dataset.eventId);
+  },{rootMargin:'0px 0px 450px 0px'});
+  guestObserver.observe(sentinel);
+}
+function repaintGuests(event) {
+  const anchor=Array.from(document.querySelectorAll('.guest-row')).find(row=>row.getBoundingClientRect().bottom>140);
+  const id=anchor?.dataset.guestId, top=anchor?.getBoundingClientRect().top;
+  document.getElementById('guestResults').innerHTML=guestRows(event);
+  if(id){const next=Array.from(document.querySelectorAll('.guest-row')).find(row=>row.dataset.guestId===id);if(next)window.scrollBy(0,next.getBoundingClientRect().top-top);}
+  bindGuestScroll();
+}
+async function loadNextGuestBatch(id) {
+  if(guestBatchLoading || location.hash!==`#/event/${id}/guests`)return;
+  guestBatchLoading=true;
+  try {
+    let event=eventStore.getEvent(id);
+    const visible=guestCandidates(event);
+    if(guestVisibleCount>=visible.length && event.guestListNextCursor){await eventStore.loadGuests(id,{append:true});event=eventStore.getEvent(id);}
+    guestVisibleCount+=GUEST_BATCH_SIZE;
+    if(location.hash===`#/event/${id}/guests`)repaintGuests(event);
+  }catch(error){guestBatchError=error.message;if(location.hash===`#/event/${id}/guests`)repaintGuests(eventStore.getEvent(id));}
+  finally{guestBatchLoading=false;if(location.hash.endsWith('/guests'))bindGuestScroll();}
 }
 function eventListPage(search = false) {
   return `<div class="event-list-view">${topbar('/',search ? 'Search' : 'Your events')}<h1>${search ? 'Find your next plan' : 'Your events'}</h1><label class="search-field">${icon('search')}<input id="eventSearch" type="search" placeholder="Search Events" aria-label="Search events" autocomplete="off"></label><div id="eventResults" class="all-events">${eventStore.listEvents().map(event=>eventRow(event)).join('')}</div>${nav()}</div>`;
@@ -196,6 +249,7 @@ function render() {
   const parts = route.split('/').filter(Boolean);
   const event = parts[0]==='event' ? eventStore.getEvent(parts[1]) : null;
   const qr = Boolean(event && parts[2]==='invite');
+  guestObserver?.disconnect();
   document.querySelectorAll('.confetti-video').forEach(video=>video.pause());
   dialog.close();
   app.hidden = qr;
@@ -220,6 +274,8 @@ function render() {
     if (!qr && app.querySelector('h1')) { app.querySelector('h1').tabIndex=-1; app.querySelector('h1').focus({preventScroll:true}); }
   }
   currentRoute = route;
+  if(parts[2]==='guests')queueMicrotask(bindGuestScroll);
+  if(!qr&&parts.length===0&&activeHeroId){const rail=document.querySelector('.coming-up-rail');const card=rail?.querySelector(`a[href="#/event/${activeHeroId}"]`);if(card)rail.scrollLeft=card.offsetLeft-rail.offsetLeft;}
   if (event?.source === 'doorlist' && !qr) hydrateEventRoute(event, parts[2] === 'guests');
 }
 function dismissDialog() {
@@ -243,6 +299,7 @@ function plusOneSheet(id) {
   sheet(event.plusOneRequested ? 'Request saved' : 'Bring a +1', `<div class="dialog-illustration">${icon('people')}</div><p class="dialog-description">${event.plusOneRequested ? 'Your +1 request is saved in this preview.' : 'Request an extra invite for '+esc(event.title)+'.'}</p><p class="dialog-note">Hosts will receive requests once your account is connected.</p><button class="primary-button" data-action="${event.plusOneRequested ? 'close-dialog' : 'request-plus-one'}" data-id="${id}">${event.plusOneRequested ? 'Done' : 'Save +1 request'}</button>`);
 }
 document.addEventListener('click', async event => {
+  const hero=event.target.closest('.coming-up-rail .event-card');if(hero)activeHeroId=hero.getAttribute('href').split('/').at(-1);
   const button = event.target.closest('[data-action]');
   if (!button) return;
   const {action,id} = button.dataset;
@@ -262,16 +319,14 @@ document.addEventListener('click', async event => {
   }
   if (action==='rsvp') rsvpSheet(id);
   if (action==='set-rsvp') { eventStore.setRsvp(id,button.dataset.status); render(); notify(`RSVP saved: ${statusLabel(button.dataset.status)}`); }
+  if(action==='playlist-add')sheet('Shared Playlist',`<p class="dialog-description">Add songs with the other guests in Doorlist.</p><a class="primary-button" href="${esc(eventStore.getEvent(id).sourceUrl)}" target="_blank" rel="noopener noreferrer">Open Doorlist</a>`);
+  if(action==='guest-retry'){guestBatchError='';loadNextGuestBatch(location.hash.split('/')[2]);}
   if (action==='guest-filter') {
     guestFilter = button.dataset.filter;
-    guestVisibleCount = 50;
+    guestVisibleCount = GUEST_BATCH_SIZE;
     document.querySelectorAll('[data-action="guest-filter"]').forEach(item=>item.setAttribute('aria-pressed',String(item===button)));
     const event = eventStore.getEvent(location.hash.split('/')[2]);
-    document.getElementById('guestResults').innerHTML = guestRows(event);
-  }
-  if (action==='guest-more') {
-    guestVisibleCount += 50;
-    document.getElementById('guestResults').innerHTML = guestRows(eventStore.getEvent(location.hash.split('/')[2]));
+    document.getElementById('guestResults').innerHTML = guestRows(event);bindGuestScroll();
   }
   if (action==='settings') { if (eventStore.mode !== 'preview') connectionSheet(); else { window.InviteView.show(eventStore.listEvents()[0],eventStore.getProfile()); window.InviteView.settings(); } }
   if (action==='event-menu') sheet('Event options',`<a class="dialog-link" href="#/event/${id}/guests">${icon('people')}Guest list${icon('next')}</a><a class="dialog-link" href="#/event/${id}/invite">${icon('qr')}Your invite${icon('next')}</a><button class="dialog-link" data-action="rsvp" data-id="${id}">${icon('calendar')}Change RSVP${icon('next')}</button>`);
@@ -282,8 +337,8 @@ document.addEventListener('click', async event => {
 document.addEventListener('input', event => {
   if (event.target.id==='guestSearch') {
     guestQuery = event.target.value;
-    guestVisibleCount = 50;
-    document.getElementById('guestResults').innerHTML = guestRows(eventStore.getEvent(location.hash.split('/')[2]));
+    guestVisibleCount = GUEST_BATCH_SIZE;
+    guestBatchError='';document.getElementById('guestResults').innerHTML = guestRows(eventStore.getEvent(location.hash.split('/')[2]));bindGuestScroll();
   }
   if (event.target.id==='eventSearch') {
     const query = event.target.value.toLowerCase();
@@ -362,7 +417,7 @@ async function hydrateEventRoute(event, guests) {
     if (location.hash.slice(1) !== route) return;
     if (guests) {
       const loaded = eventStore.getEvent(event.id);
-      document.getElementById('guestResults').innerHTML = guestRows(loaded);
+      document.getElementById('guestResults').innerHTML = guestRows(loaded);bindGuestScroll();
       document.querySelector('.guest-list-view>.preview-note').textContent = guestSourceNote(loaded);
     } else render();
   } catch (error) {
@@ -374,5 +429,5 @@ async function hydrateEventRoute(event, guests) {
 function guestSourceNote(event) {
   if (event.guestListGenerated) return 'Generated preview · Sample people, not confirmed attendees';
   if (event.source !== 'doorlist') return 'Sample guest list';
-  return event.guestListPartial ? 'Doorlist returned a partial guest list.' : 'From Doorlist';
+  return '';
 }

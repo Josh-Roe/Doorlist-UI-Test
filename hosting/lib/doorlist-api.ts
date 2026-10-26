@@ -121,7 +121,7 @@ export async function handleDoorlist(request:Request,env:Runtime) {
     }
     const match=/^\/api\/events\/([\w-]{5,100})(?:\/(guests|invite))?$/.exec(url.pathname);
     if(request.method==='GET'&&match) {
-      const result=match[2]==='guests'?await p.loadGuests(match[1]):match[2]==='invite'?await p.loadInvite(match[1]):{event:await p.loadEvent(match[1])};
+      const result=match[2]==='guests'?await p.loadGuests(match[1],{cursor:url.searchParams.get('cursor')||'',pageLimit:5,enrichPhotos:true}):match[2]==='invite'?await p.loadInvite(match[1]):{event:await p.loadEvent(match[1])};
       await saveSession(session,env);return reply(result);
     }
     return reply({error:'Not found.'},404);

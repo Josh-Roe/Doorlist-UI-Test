@@ -77,17 +77,23 @@ export const eventStore = {
     if (index >= 0) events[index] = { ...events[index], ...event };
     return this.getEvent(id);
   },
-  async loadGuests(id) {
+  async loadGuests(id, { append = false } = {}) {
+    const existing=events.find(item=>item.id===id);
+    const cursor=append?existing?.guestListNextCursor:null;
+    if(append&&!cursor)return {guests:existing?.guests||[],generated:Boolean(existing?.guestListGenerated)};
     let result;
-    try { result = await request(`/api/events/${encodeURIComponent(id)}/guests`); }
+    try { result = await request(`/api/events/${encodeURIComponent(id)}/guests${cursor?`?cursor=${encodeURIComponent(cursor)}`:''}`); }
     catch (error) {
-      if (error.status === 401) throw error;
+      if (error.status === 401 || append) throw error;
       result = { guests: [], restricted: true, partial: false };
     }
+    if(append&&result.nextPageToken===cursor)throw new Error('The next page could not be loaded. Try again.');
+    if(append&&result.restricted)throw new Error('The remaining guest list is unavailable.');
     const generated = Boolean(result.restricted);
-    const guests = generated ? generateGuestPreview(id) : result.guests;
+    const page=generated?generateGuestPreview(id):result.guests;
+    const guests=append?[...new Map([...(existing?.guests||[]),...page].map(person=>[person.id,person])).values()]:page;
     const event = events.find(item => item.id === id);
-    if (event) Object.assign(event, { guests, guestsLoaded: true, guestListRestricted: result.restricted, guestListPartial: result.partial, guestListGenerated: generated });
+    if (event) Object.assign(event, { guests, guestsLoaded: true, guestListRestricted: result.restricted, guestListPartial: result.partial, guestListGenerated: generated, guestListNextCursor:result.nextPageToken || null });
     return { ...result, guests, generated };
   },
   loadInvite: id => request(`/api/events/${encodeURIComponent(id)}/invite`),

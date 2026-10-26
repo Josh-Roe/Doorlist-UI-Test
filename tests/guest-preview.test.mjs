@@ -39,3 +39,22 @@ test('unavailable lists generate previews; real lists stay real and expired sess
   assert.equal(eventStore.authenticated,false);
   assert.equal(eventStore.listEvents().length,0);
 });
+test('guest pages append without duplicates and pagination failures preserve the loaded list',async t=>{
+ const originalFetch=globalThis.fetch;t.after(()=>{globalThis.fetch=originalFetch;});let fail=false;
+ globalThis.fetch=async path=>{
+  if(path==='/api/session')return Response.json({authenticated:true,profile:{id:'self',name:'Self'}});
+  if(path==='/api/events')return Response.json({events:[{id:'paged-event',guests:[]}],profile:{id:'self',name:'Self'}});
+  if(path.includes('cursor=')){
+   if(fail)return Response.json({error:'Try again'},{status:502});
+   return Response.json({guests:[{id:'one',name:'One',status:'going'},{id:'two',name:'Two',status:'invited'}],restricted:false,nextPageToken:'third'});
+  }
+  return Response.json({guests:[{id:'one',name:'One',status:'going'}],restricted:false,nextPageToken:'second'});
+ };
+ await eventStore.initialize();await eventStore.loadGuests('paged-event');
+ await eventStore.loadGuests('paged-event',{append:true});
+ assert.equal(eventStore.getGuests('paged-event').length,2);
+ assert.equal(eventStore.getEvent('paged-event').guestListNextCursor,'third');
+ fail=true;await assert.rejects(eventStore.loadGuests('paged-event',{append:true}),/Try again/);
+ assert.equal(eventStore.getGuests('paged-event').length,2);
+ assert.equal(eventStore.getEvent('paged-event').guestListGenerated,false);
+});

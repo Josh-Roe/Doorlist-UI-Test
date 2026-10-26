@@ -33,6 +33,16 @@ export function normalizeStatus(status) {
   if (['not-going', 'notgoing', 'no', '3'].includes(value)) return 'not-going';
   return 'invited';
 }
+export function normalizeLocation(value, fallback = '') {
+  if (typeof value === 'string' && value.trim()) return {location:value.trim(),locationAddress:value.trim()};
+  if (value && typeof value === 'object') {
+    const street=[value.streetNumber,value.street].filter(Boolean).join(' ').trim();
+    const address=[street,value.city,value.state].filter(Boolean).join(', ');
+    const title=street || String(value.nickname || value.readable || value.address || value.name || value.formattedAddress || '');
+    if (title || address) return {location:title || address,locationAddress:address || title};
+  }
+  return {location:fallback || 'Location not shared',locationAddress:fallback || ''};
+}
 export function normalizeEvent(event, access = 'discover') {
   const id = String(event.eventId || event.id || '');
   if (!/^[\w-]{5,100}$/.test(id) || !event.name) return null;
@@ -44,7 +54,7 @@ export function normalizeEvent(event, access = 'discover') {
     hostPhoto: safeImage(event.orgCoverPhoto || event.hostPhoto || event.hostProfilePicture),
     image: safeImage(event.eventCoverCroppedURL || event.eventCoverURL || event.coverPhotoURL),
     theme: 'purple', startsAt: start, endsAt: end,
-    location: typeof event.location === 'string' ? event.location : String(event.locationName || event.address || 'See event details in Doorlist'),
+    ...normalizeLocation(event.location, String(event.locationName || event.address || '')),
     description: String(event.description || ''), rsvp: 'invited', canRsvp: access === 'invited',
     access, source: 'doorlist', sourceUrl: `https://doorlist.app/e/${encodeURIComponent(event.linkID || id.slice(0, 7))}`,
     isPaidEvent: Boolean(event.isPaidEvent), guests: [], guestsLoaded: false, guestListPartial: false,
@@ -212,9 +222,10 @@ export class DoorlistProvider {
   }
   async loadEvent(id) {
     let event = this.requireEvent(id);
-    const [details, guest] = await Promise.allSettled([
+    const [details, guest, playlist] = await Promise.allSettled([
       this.firestore(`eventObjects/${encodeURIComponent(id)}`),
       this.firestore(`eventObjects/${encodeURIComponent(id)}/guests/${encodeURIComponent(this.profile.id)}`),
+      this.api(`/api/event-playlist/playlist/${encodeURIComponent(id)}`),
     ]);
     if (details.status === 'fulfilled') {
       const fields = decodeFields(details.value.fields);
@@ -227,14 +238,21 @@ export class DoorlistProvider {
     }
     const authorizationError = result => result.status === 'rejected' && result.reason.status === 401;
     if ([details, guest].some(authorizationError)) throw new ProviderError('Your Doorlist session expired. Please sign in again.', 401);
+    if (playlist.status === 'fulfilled') {
+      const data=playlist.value || {};
+      event.playlist={name:String(data.playlist_name || 'Shared Playlist'),url:safeImage(data.playlist_url),image:safeImage(data.playlist_cover_url),songCount:Number(data.total_songs) || (Array.isArray(data.songs)?data.songs.length:0)};
+    }
     event.detailsLoaded = true;
     event.detailsRestricted = details.status === 'rejected';
     this.allowedEvents.set(id, event);
     return event;
   }
-  async loadGuests(id) {
+  async loadGuests(id, options = {}) {
     this.requireEvent(id);
-    const guests = []; let pageToken = ''; let pages = 0;
+    const cursor=options.cursor || '';
+    if(typeof cursor !== 'string' || cursor.length>2048)throw new ProviderError('Invalid guest-list cursor.',400);
+    const pageLimit=Math.max(1,Math.min(50,Number(options.pageLimit)||50));
+    const guests = []; let pageToken = cursor; let pages = 0;
     try {
       do {
         pages++;
@@ -247,8 +265,18 @@ export class DoorlistProvider {
           guests.push({ id: doc.name.split('/').at(-1), name: guest.name, status: normalizeStatus(guest.rsvpStatus), photo: safeImage(guest.profilePhotoUrl || guest.profilePhotoURL || guest.profilePictureUrl || guest.profilePicture || guest.photoURL), color: guests.length % 6 });
         }
         pageToken = page.nextPageToken || '';
-      } while (pageToken && pages < 5);
-      return { guests, restricted: false, partial: Boolean(pageToken) };
+      } while (pageToken && pages < pageLimit);
+      if(options.enrichPhotos) {
+        const missing=guests.filter(person=>!person.photo);
+        await Promise.all(Array.from({length:Math.ceil(missing.length/100)},async(_,index)=>{
+          const batch=missing.slice(index*100,index*100+100);
+          try {
+            const details=await this.api('/api/users/light_details',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({uuids:batch.map(person=>person.id)})});
+            for(const person of batch){const detail=details?.[person.id];person.photo=safeImage(detail?.profilePictureUrl || detail?.profilePicture || detail?.profilePhotoUrl);}
+          }catch { /* An unavailable account photo keeps its local neutral avatar. */ }
+        }));
+      }
+      return { guests, restricted: false, partial: Boolean(pageToken), nextPageToken:pageToken || null };
     } catch (error) {
       if (error.status === 401) throw error;
       if (![403, 404].includes(error.status)) throw error;
