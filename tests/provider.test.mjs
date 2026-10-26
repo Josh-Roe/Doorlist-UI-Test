@@ -210,3 +210,11 @@ test('cached profile badge mix is stable near eight to one and never alters actu
  assert.ok(p.listProfiles().every(p=>!('displayStatus' in p)));
  assert.ok(!JSON.stringify(p.snapshot()).includes('test-session-only'));
 });
+
+
+test('native user-group ID envelopes resolve membership events',async()=>{
+ const p=provider();
+ p.api=async path=>path.includes('/users/groups/')?{all:['member-group'],admin:[]}:{eventIds:['member-event']};
+ p.firestore=async path=>{assert.equal(path,'eventObjects/member-event');return {fields:{name:{stringValue:'Membership event'}}};};
+ assert.equal((await p.groupEvents()).events[0].eventId,'member-event');
+});

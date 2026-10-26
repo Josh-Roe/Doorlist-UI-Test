@@ -256,18 +256,42 @@ function navigate() {
   savedScroll.set(currentRoute,window.scrollY);
   const kind=transitionKind(currentRoute,target);
   document.documentElement.dataset.navigation=kind;
-  activeTransition?.skipTransition?.();
-  if(document.startViewTransition && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    const transition=document.startViewTransition(()=>render());
-    activeTransition=transition;
-    transition.finished.catch(()=>{}).finally(()=>{if(activeTransition!==transition)return;activeTransition=null;if(pendingDataRender){pendingDataRender=false;renderDataUpdate();}});
-  } else {
-    render();
-    if(!matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      const surface=document.querySelector('#inviteView:not([hidden]),#appView:not([hidden])');
-      surface?.animate(kind==='tab'?[{opacity:.4},{opacity:1}]:[{opacity:.6,transform:`translate${kind==='present'||kind==='dismiss'?'Y':'X'}(${kind==='back'||kind==='dismiss'?'-':'+'}22px)`},{opacity:1,transform:'none'}],{duration:340,easing:'cubic-bezier(.2,.8,.2,1)'});
-    }
+  activeTransition?.cancel();
+  activeTransition=null;
+  // Commit the route immediately. Snapshotting long lists and playing video is expensive.
+  render();
+  if(matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+  const surface=invite.hidden?app:invite;
+  const animation=surface.animate([{opacity:.86},{opacity:1}],{duration:140,easing:'ease-out'});
+  activeTransition=animation;
+  animation.finished.catch(()=>{}).finally(()=>{
+    if(activeTransition!==animation)return;
+    activeTransition=null;if(pendingDataRender)renderDataUpdate();
+  });
+}
+// Keep images, video decoders and focused controls alive during background updates.
+function patchSurface(parent,html) {
+  const template=document.createElement('template');template.innerHTML=html;
+  const key=node=>node.nodeType===1?(node.id||node.getAttribute('data-guest-id')||node.getAttribute('href')||`${node.tagName}:${node.getAttribute('class')||''}`):'';
+  function patch(oldNode,newNode) {
+    if(oldNode.nodeType!==newNode.nodeType||oldNode.nodeName!==newNode.nodeName){oldNode.replaceWith(newNode.cloneNode(true));return;}
+    if(oldNode.nodeType!==1){if(oldNode.nodeValue!==newNode.nodeValue)oldNode.nodeValue=newNode.nodeValue;return;}
+    if(oldNode.matches('video,.confetti-field'))return;
+    for(const attr of [...oldNode.attributes])if(!newNode.hasAttribute(attr.name)&&!attr.name.startsWith('data-fallback'))oldNode.removeAttribute(attr.name);
+    for(const attr of [...newNode.attributes])if(oldNode.getAttribute(attr.name)!==attr.value&&!(oldNode===document.activeElement&&attr.name==='value'))oldNode.setAttribute(attr.name,attr.value);
+    reconcile(oldNode,newNode);
   }
+  function reconcile(target,source) {
+    const oldChildren=[...target.childNodes],used=new Set();
+    for(const [index,newChild] of [...source.childNodes].entries()) {
+      const identity=key(newChild);
+      const candidate=oldChildren.find(node=>!used.has(node)&&node.nodeName===newChild.nodeName&&key(node)===identity);
+      if(candidate){used.add(candidate);if(target.childNodes[index]!==candidate)target.insertBefore(candidate,target.childNodes[index]||null);patch(candidate,newChild);}
+      else target.insertBefore(newChild.cloneNode(true),target.childNodes[index]||null);
+    }
+    for(const child of oldChildren)if(!used.has(child)&&child.parentNode===target)child.remove();
+  }
+  reconcile(parent,template.content);
 }
 function render({background=false}={}) {
   const previousY=window.scrollY;
@@ -278,23 +302,25 @@ function render({background=false}={}) {
   const event = parts[0]==='event' ? eventStore.getEvent(parts[1]) : null;
   const qr = Boolean(event && parts[2]==='invite');
   guestObserver?.disconnect();
-  document.querySelectorAll('.confetti-video,.template-video').forEach(video=>video.pause());
+  if(!background)document.querySelectorAll('.confetti-video,.template-video').forEach(video=>video.pause());
   if(!background)dialog.close();
   app.hidden = qr;
   invite.hidden = !qr;
   document.body.dataset.page = qr ? 'invite' : parts[0] || 'home';
   if (qr) {
-    window.InviteView.show(event,eventStore.getProfile(), { live: event.source === 'doorlist' });
+    if(!background)window.InviteView.show(event,eventStore.getProfile(), { live: event.source === 'doorlist' });
     document.title = `${event.title} — Your invite`;
   } else {
     window.InviteView.hide();
-    if (parts[0]==='event' && !event && eventStore.status === 'loading') app.innerHTML = `${topbar('/')}<div class="not-found">${empty('Loading events','Connecting to your Doorlist account.','calendar')}</div>`;
-    else if (parts[0]==='event' && !event) app.innerHTML = `${topbar('/')}<div class="not-found">${empty('Event unavailable','This event could not be found.','calendar')}<a class="primary-button" href="#/">Back to home</a></div>`;
-    else if (event) app.innerHTML = parts[2]==='guests' ? guestListPage(event) : eventPage(event);
-    else if (parts[0]==='events' || parts[0]==='search') app.innerHTML = eventListPage(parts[0]==='search');
-    else if (parts[0]==='activity') app.innerHTML = `<div class="activity-view">${topbar('/','Activity')}${empty('All caught up','Your invites, event updates, and +1 requests will show up here.','bell')}${nav('bell')}</div>`;
-    else if (parts[0]==='profile') app.innerHTML = profilePage();
-    else app.innerHTML = home();
+    let markup;
+    if (parts[0]==='event' && !event && eventStore.status === 'loading') markup = `${topbar('/')}<div class="not-found">${empty('Loading events','Connecting to your Doorlist account.','calendar')}</div>`;
+    else if (parts[0]==='event' && !event) markup = `${topbar('/')}<div class="not-found">${empty('Event unavailable','This event could not be found.','calendar')}<a class="primary-button" href="#/">Back to home</a></div>`;
+    else if (event) markup = parts[2]==='guests' ? guestListPage(event) : eventPage(event);
+    else if (parts[0]==='events' || parts[0]==='search') markup = eventListPage(parts[0]==='search');
+    else if (parts[0]==='activity') markup = `<div class="activity-view">${topbar('/','Activity')}${empty('All caught up','Your invites, event updates, and +1 requests will show up here.','bell')}${nav('bell')}</div>`;
+    else if (parts[0]==='profile') markup = profilePage();
+    else markup = home();
+    if(background)patchSurface(app,markup);else app.innerHTML=markup;
     document.title = event ? `${event.title} — Doorlist` : 'Doorlist';
   }
   if (currentRoute !== route) {
@@ -356,7 +382,7 @@ document.addEventListener('click', async event => {
     guestVisibleCount = GUEST_BATCH_SIZE;
     document.querySelectorAll('[data-action="guest-filter"]').forEach(item=>item.setAttribute('aria-pressed',String(item===button)));
     const event = eventStore.getEvent(location.hash.split('/')[2]);
-    document.getElementById('guestResults').innerHTML = guestRows(event);bindGuestScroll();
+    patchSurface(document.getElementById('guestResults'),guestRows(event));bindGuestScroll();
   }
   if (action==='settings') { if (eventStore.mode !== 'preview') connectionSheet(); else { window.InviteView.show(eventStore.listEvents()[0],eventStore.getProfile()); window.InviteView.settings(); } }
   if (action==='event-menu') sheet('Event options',`<a class="dialog-link" href="#/event/${id}/guests">${icon('people')}Guest list${icon('next')}</a><a class="dialog-link" href="#/event/${id}/invite">${icon('qr')}Your invite${icon('next')}</a><button class="dialog-link" data-action="rsvp" data-id="${id}">${icon('calendar')}Change RSVP${icon('next')}</button>`);
@@ -368,7 +394,7 @@ document.addEventListener('input', event => {
   if (event.target.id==='guestSearch') {
     guestQuery = event.target.value;
     guestVisibleCount = GUEST_BATCH_SIZE;
-    guestBatchError='';document.getElementById('guestResults').innerHTML = guestRows(eventStore.getEvent(location.hash.split('/')[2]));bindGuestScroll();
+    guestBatchError='';patchSurface(document.getElementById('guestResults'),guestRows(eventStore.getEvent(location.hash.split('/')[2])));bindGuestScroll();
   }
   if (event.target.id==='eventSearch') {
     const query = event.target.value.toLowerCase();
@@ -438,9 +464,8 @@ document.addEventListener('submit', async event => {
 });
 async function refreshEvents() {
   dialog.close();
-  const promise = eventStore.refresh(); render();
-  try { await promise; render(); notify('Events refreshed'); }
-  catch (error) { render(); notify(error.message); }
+  try { await eventStore.refresh(); notify('Events refreshed'); }
+  catch (error) { notify(error.message); }
 }
 async function hydrateEventRoute(event, guests) {
   const key = `${event.id}:${guests ? 'guests' : 'details'}`;
@@ -455,7 +480,7 @@ async function hydrateEventRoute(event, guests) {
     if (location.hash.slice(1) !== route) return;
     if (guests) {
       const loaded = eventStore.getEvent(event.id);
-      document.getElementById('guestResults').innerHTML = guestRows(loaded);bindGuestScroll();
+      patchSurface(document.getElementById('guestResults'),guestRows(loaded));bindGuestScroll();
       document.querySelector('.guest-list-view>.preview-note').textContent = guestSourceNote(loaded);
     } else renderDataUpdate();
   } catch (error) {

@@ -225,18 +225,20 @@ export class DoorlistProvider {
       invited: events.filter(event => event.access === 'invited').length,
       discoverable: events.filter(event => event.access === 'discover').length,
       eligibleEventCount: eligible, limited, partial: limited || results.some(result => result.status === 'rejected'),
+      sources:Object.fromEntries(['account','friends','home','trending','profile','groups'].map((name,index)=>{const result=results[index];return [name,result.status==='fulfilled'?{count:(result.value.events||result.value.lightEvents||[]).length}:{count:0,status:result.reason.status||502}];})),
     };
     return this.snapshot();
   }
   async groupEvents() {
     const result=await this.api(`/api/users/groups/${encodeURIComponent(this.profile.id)}`);
-    const groups=Array.isArray(result)?result:Array.isArray(result.groups)?result.groups:[];
+    const groups=Array.isArray(result)?result:Array.isArray(result.groups)?result.groups:Array.isArray(result.all)?result.all.map(id=>({id})):[];
     const ids=new Set();
     await Promise.all(groups.map(async group=>{
       if(Array.isArray(group.members)&&!group.members.includes(this.profile.id))return;
       let details=group;
       if(!Array.isArray(details.eventIds)&&/^[\w-]{1,100}$/.test(String(group.id||group.uuid||''))){
-        try{details=decodeFields((await this.firestore(`organizations/${encodeURIComponent(group.id||group.uuid)}`)).fields);}catch{return;}
+        try{const response=await this.api(`/api/group/${encodeURIComponent(group.id||group.uuid)}`);details=response.group||response;}catch{/* Try the same group's authorized document. */}
+        if(!Array.isArray(details.eventIds))try{details=decodeFields((await this.firestore(`organizations/${encodeURIComponent(group.id||group.uuid)}`)).fields);}catch{return;}
       }
       for(const id of details.eventIds||[])if(/^[\w-]{5,100}$/.test(String(id)))ids.add(String(id));
     }));
