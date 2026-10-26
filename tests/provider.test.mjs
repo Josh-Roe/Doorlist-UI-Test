@@ -22,6 +22,8 @@ test('event normalization preserves access distinction and rejects unsafe images
   assert.equal(normalizeEvent(raw('../bad')), null);
   assert.equal(normalizeEvent(raw('event-123', { time: null, endTime: null })).startsAt, null);
   assert.equal(normalizeStatus('Not Going'), 'not-going');
+  assert.equal(normalizeEvent(raw('event-count',{goingCount:42})).goingCount,42);
+  assert.equal(normalizeEvent(raw('event-count')).goingCount,null);
 });
 test('all event sources merge, deduplicate, sort, exclude ended events and retain invited status', async () => {
   const p = provider();

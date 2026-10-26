@@ -55,6 +55,7 @@ export function normalizeEvent(event, access = 'discover') {
     image: safeImage(event.eventCoverCroppedURL || event.eventCoverURL || event.coverPhotoURL),
     theme: 'purple', startsAt: start, endsAt: end,
     ...normalizeLocation(event.locationReadable && Object.values(event.locationReadable).some(Boolean) ? event.locationReadable : event.location, String(event.locationName || event.address || '')),
+    goingCount:event.goingCount!=null&&Number.isInteger(Number(event.goingCount))&&Number(event.goingCount)>=0?Number(event.goingCount):null,
     description: String(event.description || ''), rsvp: 'invited', canRsvp: access === 'invited',
     access, source: 'doorlist', sourceUrl: `https://doorlist.app/e/${encodeURIComponent(event.linkID || id.slice(0, 7))}`,
     isPaidEvent: Boolean(event.isPaidEvent), guests: [], guestsLoaded: false, guestListPartial: false,
@@ -232,11 +233,12 @@ export class DoorlistProvider {
       const [photo, circles, location] = await Promise.allSettled([
         hosts.get(event.hostId) || Promise.resolve(event.hostPhoto),
         this.api(`/api/event/${encodeURIComponent(event.id)}/circles`),
-        event.locationAddress ? Promise.resolve(null) : this.firestore(`eventObjects/${encodeURIComponent(event.id)}`),
+        event.locationAddress && event.goingCount!=null ? Promise.resolve(null) : this.firestore(`eventObjects/${encodeURIComponent(event.id)}`),
       ]);
       if (photo.status === 'fulfilled' && photo.value) event.hostPhoto = photo.value;
       if(location.status==='fulfilled'&&location.value?.fields) {
         const fields=decodeFields(location.value.fields);
+        if(fields.goingCount!=null&&Number.isInteger(Number(fields.goingCount))&&Number(fields.goingCount)>=0)event.goingCount=Number(fields.goingCount);
         if(!fields.hideDetailsIfNotOnList || event.access==='invited')Object.assign(event,normalizeLocation(fields.locationReadable || fields.location));
       }
       const rows = circles.status === 'fulfilled' ? (circles.value.guests || circles.value.attendees || []) : [];
@@ -258,7 +260,7 @@ export class DoorlistProvider {
     if (details.status === 'fulfilled') {
       const fields = decodeFields(details.value.fields);
       const normalized = normalizeEvent({ ...fields, eventId: id }, event.access);
-      if (normalized) event = { ...event, ...normalized, image: normalized.image || event.image, hostPhoto: normalized.hostPhoto || event.hostPhoto, location:normalized.locationAddress?normalized.location:event.location, locationAddress:normalized.locationAddress||event.locationAddress };
+      if (normalized) event = { ...event, ...normalized, image: normalized.image || event.image, hostPhoto: normalized.hostPhoto || event.hostPhoto, location:normalized.locationAddress?normalized.location:event.location, locationAddress:normalized.locationAddress||event.locationAddress, goingCount:normalized.goingCount??event.goingCount };
     }
     if (guest.status === 'fulfilled') {
       const fields = decodeFields(guest.value.fields);

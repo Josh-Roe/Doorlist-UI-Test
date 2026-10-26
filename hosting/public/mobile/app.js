@@ -116,7 +116,7 @@ function gatheringSection() {
   return `<section class="home-section gathering-section"><h2>Get people together!</h2><p>Tap to make an event</p><div class="gathering-rail">${gatheringTemplates.map(template=>`<button class="gathering-card" data-action="event-template" data-template="${template.id}" aria-label="${esc(template.title)}. ${esc(template.description)}"><img class="native-template-art" loading="lazy" src="${template.image}" alt="">${template.motion?`<video class="template-video" data-template-video="${template.id}" muted loop autoplay playsinline preload="metadata" aria-hidden="true"><source src="${template.motion}" type="video/mp4"></video>`:''}</button>`).join('')}</div></section>`;
 }
 function hostTile(events) {
-  return `<button class="host-card" data-action="create"><span class="host-art poster-stack" aria-hidden="true">${events.slice(0,3).map(event=>`<span class="mini-poster">${poster(event)}</span>`).join('')}${events.length?'':icon('calendar')}</span><strong>Become a Host</strong><span>Host and invite your friends!</span></button>`;
+  return `<button class="host-card" data-action="create"><svg class="host-card-outline" viewBox="0 0 236 236" preserveAspectRatio="none" aria-hidden="true"><rect x="1" y="1" width="234" height="234" rx="23" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="10 10" vector-effect="non-scaling-stroke"/></svg><span class="host-art poster-stack" aria-hidden="true">${events.slice(0,3).map(event=>`<span class="mini-poster">${poster(event)}</span>`).join('')}${events.length?'':icon('calendar')}</span><strong>Create your own event</strong><span>Host and invite your friends!</span></button>`;
 }
 function home() {
   const events=eventStore.listEvents();
@@ -161,10 +161,10 @@ function eventRow(event) {
 }
 function eventPage(event) {
   const date = dateParts(event);
-  const going = event.guests.filter(guest=>guest.status==='going').length + (event.source !== 'doorlist' && event.rsvp==='going' ? 1 : 0);
+  const going = event.goingCount ?? (event.guests.filter(guest=>guest.status==='going').length + (event.source !== 'doorlist' && event.rsvp==='going' ? 1 : 0));
   return `<div class="event-view theme-${esc(event.theme)}">${confettiBackground()}${topbar('/', '', `<button class="glass-button" data-action="event-menu" data-id="${event.id}" aria-label="Event options">${icon('more')}</button>`)}
     <h1 class="event-title">${esc(event.title)}</h1><div class="detail-poster">${poster(event)}</div>
-    <a class="guest-summary glass-panel" href="#/event/${event.id}/guests">${avatarStack(event)}<span><strong>Guest List</strong><small>${event.guestListSource==='profile-cache'?'Profile suggestions · RSVP unknown':event.source === 'doorlist' && !event.guestsLoaded ? 'See who’s going' : `${going} going`}</small></span><span class="see-all">See All ${icon('next')}</span></a>
+    <a class="guest-summary glass-panel" href="#/event/${event.id}/guests">${avatarStack(event)}<span><strong>Guest List</strong><small>${going} going</small></span><span class="see-all">See All ${icon('next')}</span></a>
     <section class="event-info"><div class="info-line"><span class="info-icon">${icon('calendar')}</span><div><span>Date</span><strong>${date.full}</strong><p>${date.time} – ${date.endTime}</p></div></div><div class="info-line">${hostAvatar(event)}<div><span>Hosted by</span><strong>${esc(event.host)}</strong></div></div><div class="info-line"><span class="info-icon">${icon('pin')}</span><div><span>Location</span><strong>${esc(event.location)}</strong>${event.locationAddress?`<a class="location-link" href="https://maps.apple.com/?q=${encodeURIComponent(event.locationAddress)}" target="_blank" rel="noopener noreferrer">${esc(event.locationAddress)}</a>`:''}</div></div></section>
     <section class="about-event"><h2>About this event</h2><p>${esc(event.description)}</p></section>
     ${sharedPlaylistSection(event)}
@@ -439,7 +439,7 @@ async function hydrateEventRoute(event, guests) {
   } finally { hydrating.delete(key); }
 }
 function guestSourceNote(event) {
-  if(event.guestListSource==='profile-cache')return 'Profile suggestions · Attendance is not confirmed';
+  if(event.guestListSource==='profile-cache')return '';
   if (event.source !== 'doorlist') return 'Sample guest list';
   return '';
 }
