@@ -54,7 +54,7 @@ export function normalizeEvent(event, access = 'discover') {
     hostPhoto: safeImage(event.orgCoverPhoto || event.hostPhoto || event.hostProfilePicture),
     image: safeImage(event.eventCoverCroppedURL || event.eventCoverURL || event.coverPhotoURL),
     theme: 'purple', startsAt: start, endsAt: end,
-    ...normalizeLocation(event.location, String(event.locationName || event.address || '')),
+    ...normalizeLocation(event.locationReadable && Object.values(event.locationReadable).some(Boolean) ? event.locationReadable : event.location, String(event.locationName || event.address || '')),
     description: String(event.description || ''), rsvp: 'invited', canRsvp: access === 'invited',
     access, source: 'doorlist', sourceUrl: `https://doorlist.app/e/${encodeURIComponent(event.linkID || id.slice(0, 7))}`,
     isPaidEvent: Boolean(event.isPaidEvent), guests: [], guestsLoaded: false, guestListPartial: false,

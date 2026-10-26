@@ -137,6 +137,7 @@ test('guest photo aliases are normalized and unsafe photo URLs are rejected', as
 test('structured Doorlist addresses become a street label and complete map address',()=>{
   assert.deepEqual(normalizeLocation({streetNumber:2647,street:'Durant Avenue',city:'Berkeley',state:'CA'}),{location:'2647 Durant Avenue',locationAddress:'2647 Durant Avenue, Berkeley, CA'});
   assert.equal(normalizeEvent(raw('event-location',{location:{nickname:'The Courtyard'}})).location,'The Courtyard');
+  assert.equal(normalizeEvent(raw('event-location',{location:{geopoint:{}},locationReadable:{streetNumber:2647,street:'Durant Avenue',city:'Berkeley',state:'CA'}})).locationAddress,'2647 Durant Avenue, Berkeley, CA');
 });
 test('guest pages expose an event-bound cursor and resolve photos by account ID',async()=>{
   const p=provider();p.allowedEvents.set('event-paged',{});
