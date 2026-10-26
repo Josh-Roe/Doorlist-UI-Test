@@ -1,16 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { eventStore, generateGuestPreview } from '../event-store.js';
+import { eventStore } from '../event-store.js';
 
-test('generated guests are stable, explicitly fictional, and use unique IDs', () => {
-  const guests = generateGuestPreview('event-123');
-  assert.deepEqual(guests, generateGuestPreview('event-123'));
-  assert.notDeepEqual(guests, generateGuestPreview('event-456'));
-  assert.ok(guests.length >= 18 && guests.length <= 24);
-  assert.equal(new Set(guests.map(guest => guest.id)).size, guests.length);
-  assert.ok(guests.every(guest => guest.generated && ['going','maybe'].includes(guest.status)));
-});
-test('unavailable lists generate previews; real lists stay real and expired sessions require login', async t => {
+test('unavailable lists use actual cached profile suggestions; real lists stay real and expired sessions require login', async t => {
   const originalFetch = globalThis.fetch;
   t.after(() => { globalThis.fetch = originalFetch; });
   let responseType = 'denied';
@@ -20,15 +12,17 @@ test('unavailable lists generate previews; real lists stay real and expired sess
     if (responseType === 'expired') return Response.json({error:'Session expired'},{status:401});
     if (responseType === 'network') throw new Error('Offline');
     if (responseType === 'real') return Response.json({guests:[{id:'real-guest',name:'Real Fixture Guest',status:'going'}],restricted:false,partial:false});
-    return Response.json({guests:[],restricted:true,partial:false});
+    return Response.json({guests:[{id:'cached-person',name:'Actual Profile Fixture',photo:'https://images.example/profile.jpg',status:'unconfirmed'}],restricted:true,partial:false,source:'profile-cache'});
   };
   await eventStore.initialize();
   const fallback = await eventStore.loadGuests('event-123');
-  assert.equal(fallback.generated,true);
+  assert.equal(fallback.generated,false);
+  assert.equal(fallback.source,'profile-cache');
+  assert.equal(fallback.guests[0].id,'cached-person');
   assert.ok(fallback.guests.length > 0);
-  assert.equal(eventStore.getEvent('event-123').guestListGenerated,true);
+  assert.equal(eventStore.getEvent('event-123').guestListSource,'profile-cache');
   responseType = 'network';
-  assert.equal((await eventStore.loadGuests('event-123')).generated,true);
+  assert.equal((await eventStore.loadGuests('event-123')).guests.length,0);
   responseType = 'real';
   const real = await eventStore.loadGuests('event-123');
   assert.equal(real.generated,false);

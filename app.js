@@ -31,7 +31,7 @@ const icons = {
 const icon = name => `<svg viewBox="0 0 24 24" aria-hidden="true">${icons[name] || icons.next}</svg>`;
 const esc = text => String(text ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const initials = name => name.split(/\s+/).map(part => part[0]).slice(0, 2).join('');
-const statusLabel = status => ({going:'Going',maybe:'Maybe','not-going':'Not going',invited:'Invited'}[status]);
+const statusLabel = status => ({going:'Going',maybe:'Maybe','not-going':'Not going',invited:'Invited',unconfirmed:'Not confirmed'}[status]);
 let currentRoute = '';
 let guestFilter = 'all';
 let guestQuery = '';
@@ -84,7 +84,7 @@ function eventCard(event, featured = false) {
   const date = dateParts(event);
   return `<a class="event-card ${featured ? 'featured-card' : 'small-event-card'}" href="#/event/${event.id}" aria-label="Open ${esc(event.title)}">
     <div class="event-poster">${poster(event)}<span class="date-badge"><strong>${date.day}</strong><span>${date.weekday}</span></span>
-    ${featured ? `<div class="hero-caption"><div class="host-line">${hostAvatar(event)}${esc(event.host)}</div><h3>${esc(event.title)}</h3><p>${date.time} – ${date.endTime} · ${esc(event.location)}</p></div>${avatarStack(event)}` : ''}</div>
+    ${featured ? `<div class="hero-caption"><div class="host-line">${hostAvatar(event)}${esc(event.host)}</div><h3>${esc(event.title)}</h3><p>${date.time} – ${date.endTime} | ${esc(event.location)}</p></div>${avatarStack(event)}` : ''}</div>
     ${!featured ? `<div class="card-caption"><span>${esc(event.host)}</span><h3>${esc(event.title)}</h3><p>${date.full} · ${date.time}${event.source === 'doorlist' ? ` · ${event.access === 'invited' ? 'Invited' : 'Discover'}` : ''}</p></div>` : ''}
   </a>`;
 }
@@ -99,9 +99,9 @@ function empty(title, message, symbol = 'search') {
 }
 const gatheringTemplates = [
   {id:'warm-up',title:'THE WARM UP',description:'Grab the crew for a pregame',image:'assets/doorlist-warm-up.png'},
-  {id:'birthday',title:'Birthday Party',description:"Celebrate you or your friend's bday",image:'assets/doorlist-birthday.png'},
+  {id:'birthday',title:'Birthday Party',description:"Celebrate you or your friend's bday",image:'assets/doorlist-birthday.png',motion:'https://storage.googleapis.com/doorlist-b6a3f.appspot.com/videoThemes/purple-confetti_1777411740084_gb1xercrd4g.mp4'},
   {id:'sunday-scaries',title:'Sunday Scaries',description:"You know the drill—let’s fight this together",image:'assets/doorlist-sunday-scaries.png'},
-  {id:'study-sesh',title:'Study Sesh',description:"Time to lock in—let’s get those A’s",image:'assets/doorlist-study-sesh.png'},
+  {id:'study-sesh',title:'Study Sesh',description:"Time to lock in—let’s get those A’s",image:'assets/doorlist-study-sesh.png',motion:'https://storage.googleapis.com/doorlist-b6a3f.appspot.com/videoThemes/math_1777424138280_y6gnutt3zmb.mp4'},
   {id:'bar-crawl',title:'BAR CRAWL',description:'Set the record for most bar stops',image:'assets/doorlist-bar-crawl.png'},
   {id:'watch-party',title:'Watch Party',description:"You're gonna wanna see this!",image:'assets/doorlist-watch-party.png'},
 ];
@@ -113,7 +113,7 @@ function suggestedFriendsSection() {
   return `<section class="home-section suggested-friends"><div class="section-heading"><h2>Suggested friends</h2><button data-action="add-friends">Add Friends ${icon('next')}</button></div>${friends.length ? `<div class="friends-rail">${friends.map(person=>`<button class="friend-suggestion" data-action="friend-profile" data-id="${esc(person.id)}" aria-label="Open ${esc(person.name)}"><span class="friend-photo">${avatar(person)}<span class="friend-add">${icon('plus')}</span></span><strong>${esc(person.name)}</strong><small>${person.mutualFriends ? `${person.mutualFriends} mutual friends` : person.mutualEvents ? `${person.mutualEvents} mutual events` : 'People you may know'}</small></button>`).join('')}</div>` : `<button class="find-friends-card" data-action="add-friends">${icon('people')}Find your people ${icon('next')}</button>`}</section>`;
 }
 function gatheringSection() {
-  return `<section class="home-section gathering-section"><h2>Get people together!</h2><p>Tap to make an event</p><div class="gathering-rail">${gatheringTemplates.map(template=>`<button class="gathering-card" data-action="event-template" data-template="${template.id}" aria-label="${esc(template.title)}. ${esc(template.description)}"><img class="native-template-art" loading="lazy" src="${template.image}" alt=""></button>`).join('')}</div></section>`;
+  return `<section class="home-section gathering-section"><h2>Get people together!</h2><p>Tap to make an event</p><div class="gathering-rail">${gatheringTemplates.map(template=>`<button class="gathering-card" data-action="event-template" data-template="${template.id}" aria-label="${esc(template.title)}. ${esc(template.description)}"><img class="native-template-art" loading="lazy" src="${template.image}" alt="">${template.motion?`<video class="template-video" data-template-video="${template.id}" muted loop autoplay playsinline preload="metadata" aria-hidden="true"><source src="${template.motion}" type="video/mp4"></video>`:''}</button>`).join('')}</div></section>`;
 }
 function hostTile(events) {
   return `<button class="host-card" data-action="create"><span class="host-art poster-stack" aria-hidden="true">${events.slice(0,3).map(event=>`<span class="mini-poster">${poster(event)}</span>`).join('')}${events.length?'':icon('calendar')}</span><strong>Become a Host</strong><span>Host and invite your friends!</span></button>`;
@@ -138,13 +138,24 @@ document.addEventListener('playing',event=>{
 },true);
 const motionPreference=matchMedia('(prefers-reduced-motion: reduce)');
 function updateConfettiPlayback() {
-  document.querySelectorAll('.confetti-video').forEach(video=>{
-    if(document.hidden || motionPreference.matches || app.hidden)video.pause();
+  document.documentElement.style.setProperty('--avatars-play-state',document.hidden?'paused':'running');
+  document.querySelectorAll('.confetti-video,.template-video').forEach(video=>{
+    if(document.hidden || motionPreference.matches || app.hidden || (video.matches('.template-video')&&!video.dataset.inView))video.pause();
     else video.play().catch(()=>{});
   });
 }
 motionPreference.addEventListener('change',updateConfettiPlayback);
 document.addEventListener('visibilitychange',updateConfettiPlayback);
+let templateVideoObserver;
+function bindTemplateMotion() {
+  templateVideoObserver?.disconnect();
+  templateVideoObserver=new IntersectionObserver(entries=>{
+    for(const entry of entries){const video=entry.target;if(entry.isIntersecting)video.dataset.inView='true';else delete video.dataset.inView;}
+    updateConfettiPlayback();
+  },{rootMargin:'120px'});
+  document.querySelectorAll('.template-video').forEach(video=>templateVideoObserver.observe(video));
+  updateConfettiPlayback();
+}
 function eventRow(event) {
   return `<a class="event-row" href="#/event/${event.id}"><span class="event-row-art">${poster(event)}</span><span class="event-row-copy"><strong>${esc(event.title)}</strong><span>${esc(dateParts(event).full)} · ${esc(dateParts(event).time)}</span></span>${icon('next')}</a>`;
 }
@@ -153,7 +164,7 @@ function eventPage(event) {
   const going = event.guests.filter(guest=>guest.status==='going').length + (event.source !== 'doorlist' && event.rsvp==='going' ? 1 : 0);
   return `<div class="event-view theme-${esc(event.theme)}">${confettiBackground()}${topbar('/', '', `<button class="glass-button" data-action="event-menu" data-id="${event.id}" aria-label="Event options">${icon('more')}</button>`)}
     <h1 class="event-title">${esc(event.title)}</h1><div class="detail-poster">${poster(event)}</div>
-    <a class="guest-summary glass-panel" href="#/event/${event.id}/guests">${avatarStack(event)}<span><strong>${event.guestListGenerated ? 'Preview Guest List' : 'Guest List'}</strong><small>${event.guestListGenerated ? 'Generated sample people' : event.source === 'doorlist' && !event.guestsLoaded ? 'See who’s going' : `${going} going`}</small></span><span class="see-all">See All ${icon('next')}</span></a>
+    <a class="guest-summary glass-panel" href="#/event/${event.id}/guests">${avatarStack(event)}<span><strong>Guest List</strong><small>${event.guestListSource==='profile-cache'?'Profile suggestions · RSVP unknown':event.source === 'doorlist' && !event.guestsLoaded ? 'See who’s going' : `${going} going`}</small></span><span class="see-all">See All ${icon('next')}</span></a>
     <section class="event-info"><div class="info-line"><span class="info-icon">${icon('calendar')}</span><div><span>Date</span><strong>${date.full}</strong><p>${date.time} – ${date.endTime}</p></div></div><div class="info-line">${hostAvatar(event)}<div><span>Hosted by</span><strong>${esc(event.host)}</strong></div></div><div class="info-line"><span class="info-icon">${icon('pin')}</span><div><span>Location</span><strong>${esc(event.location)}</strong>${event.locationAddress?`<a class="location-link" href="https://maps.apple.com/?q=${encodeURIComponent(event.locationAddress)}" target="_blank" rel="noopener noreferrer">${esc(event.locationAddress)}</a>`:''}</div></div></section>
     <section class="about-event"><h2>About this event</h2><p>${esc(event.description)}</p></section>
     ${sharedPlaylistSection(event)}
@@ -177,7 +188,7 @@ function guestRows(event) {
   if (!event) return empty('Sign in to view guests', 'Reconnect your Doorlist account.', 'people');
   const profile = eventStore.getProfile();
   if (event.source === 'doorlist' && !event.guestsLoaded) return empty('Loading guests', 'Checking the guest list available to your account.', 'people');
-  if (event.guestListRestricted && !event.guestListGenerated) return empty('Guest list unavailable', 'Doorlist has not granted access to this guest list.', 'people');
+  if (event.guestListRestricted && event.guestListSource!=='profile-cache') return empty('Guest list unavailable', 'Doorlist has not granted access to this guest list.', 'people');
   const filtered=guestCandidates(event);
   const more=filtered.length>guestVisibleCount || event.guestListNextCursor;
   return (filtered.length?`<ul class="guest-list">${filtered.slice(0,guestVisibleCount).map(guest=>`<li class="guest-row" data-guest-id="${esc(guest.id)}" ${guest.isSelf?'data-self="true"':''}>${avatar(guest)}<span class="guest-name">${esc(guest.name)}${guest.isSelf?'':`<span class="guest-heart" aria-hidden="true">${icon('heart')}</span>`}</span><span class="guest-status guest-status-${guest.status}" aria-label="${statusLabel(guest.status)}">${guest.status==='going'?icon('thumb'):guest.status==='maybe'?'?':guest.status==='not-going'?'−':'·'}</span></li>`).join('')}</ul>`:empty('No guests found','Try a different name or filter.')) + (more?`<div id="guestListSentinel" data-event-id="${esc(event.id)}" class="guest-list-sentinel" role="status">${guestBatchError?`<span>${esc(guestBatchError)}</span><button data-action="guest-retry">Try again</button>`:'<span class="guest-loading-dot" aria-hidden="true"></span><span class="sr-only">Loading more guests</span>'}</div>`:'');
@@ -250,7 +261,7 @@ function render() {
   const event = parts[0]==='event' ? eventStore.getEvent(parts[1]) : null;
   const qr = Boolean(event && parts[2]==='invite');
   guestObserver?.disconnect();
-  document.querySelectorAll('.confetti-video').forEach(video=>video.pause());
+  document.querySelectorAll('.confetti-video,.template-video').forEach(video=>video.pause());
   dialog.close();
   app.hidden = qr;
   invite.hidden = !qr;
@@ -274,6 +285,7 @@ function render() {
     if (!qr && app.querySelector('h1')) { app.querySelector('h1').tabIndex=-1; app.querySelector('h1').focus({preventScroll:true}); }
   }
   currentRoute = route;
+  queueMicrotask(bindTemplateMotion);
   if(parts[2]==='guests')queueMicrotask(bindGuestScroll);
   if(!qr&&parts.length===0&&activeHeroId){const rail=document.querySelector('.coming-up-rail');const card=rail?.querySelector(`a[href="#/event/${activeHeroId}"]`);if(card)rail.scrollLeft=card.offsetLeft-rail.offsetLeft;}
   if (event?.source === 'doorlist' && !qr) hydrateEventRoute(event, parts[2] === 'guests');
@@ -427,7 +439,7 @@ async function hydrateEventRoute(event, guests) {
   } finally { hydrating.delete(key); }
 }
 function guestSourceNote(event) {
-  if (event.guestListGenerated) return 'Generated preview · Sample people, not confirmed attendees';
+  if(event.guestListSource==='profile-cache')return 'Profile suggestions · Attendance is not confirmed';
   if (event.source !== 'doorlist') return 'Sample guest list';
   return '';
 }

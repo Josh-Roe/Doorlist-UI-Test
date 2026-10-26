@@ -55,6 +55,7 @@ async function getSession(request:Request,env:Runtime) {
     const provider=new DoorlistProvider();
     Object.assign(provider,data.provider);
     provider.allowedEvents=new Map(data.provider.allowedEvents||[]);
+    provider.profilePool=new Map(data.provider.profilePool||[]);
     return {...data,id,raw,provider};
   } catch { return null; }
 }
@@ -62,7 +63,7 @@ async function saveSession(session:any,env:Runtime) {
   const p=session.provider;
   const data={phone:session.phone,codeTime:session.codeTime,attempts:session.attempts,
     provider:{profile:p.profile,accessToken:p.accessToken,refreshToken:p.refreshToken,expiresAt:p.expiresAt,
-      firebaseToken:p.firebaseToken,firebaseExpiry:p.firebaseExpiry,allowedEvents:[...p.allowedEvents]}};
+      firebaseToken:p.firebaseToken,firebaseExpiry:p.firebaseExpiry,allowedEvents:[...p.allowedEvents],profilePool:[...p.profilePool]}};
   const cipher=await encryptSession(data,env,session.id);
   await env.DB!.prepare('INSERT INTO doorlist_sessions(id,ciphertext,expires_at) VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET ciphertext=excluded.ciphertext,expires_at=excluded.expires_at')
     .bind(session.id,cipher,Date.now()+12*3600000).run();
@@ -116,6 +117,7 @@ export async function handleDoorlist(request:Request,env:Runtime) {
     }
     if(!session?.provider.profile)throw new ProviderError('Sign in to connect your Doorlist events.',401);
     const p=session.provider;
+    if(request.method==='GET'&&url.pathname==='/api/profiles')return reply({profiles:p.listProfiles(),scope:'signed-in-account'});
     if(request.method==='GET'&&url.pathname==='/api/events') {
       const result=await p.syncEvents();await saveSession(session,env);return reply(result);
     }

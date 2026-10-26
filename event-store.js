@@ -85,16 +85,17 @@ export const eventStore = {
     try { result = await request(`/api/events/${encodeURIComponent(id)}/guests${cursor?`?cursor=${encodeURIComponent(cursor)}`:''}`); }
     catch (error) {
       if (error.status === 401 || append) throw error;
-      result = { guests: [], restricted: true, partial: false };
+      result = { guests: [], restricted: true, partial: false, source:'profile-cache' };
     }
     if(append&&result.nextPageToken===cursor)throw new Error('The next page could not be loaded. Try again.');
     if(append&&result.restricted)throw new Error('The remaining guest list is unavailable.');
-    const generated = Boolean(result.restricted);
-    const page=generated?generateGuestPreview(id):result.guests;
+    const generated = false;
+    const source=result.source || (result.restricted?'profile-cache':'doorlist');
+    const page=result.guests || [];
     const guests=append?[...new Map([...(existing?.guests||[]),...page].map(person=>[person.id,person])).values()]:page;
     const event = events.find(item => item.id === id);
-    if (event) Object.assign(event, { guests, guestsLoaded: true, guestListRestricted: result.restricted, guestListPartial: result.partial, guestListGenerated: generated, guestListNextCursor:result.nextPageToken || null });
-    return { ...result, guests, generated };
+    if (event) Object.assign(event, { guests, guestsLoaded: true, guestListRestricted: result.restricted, guestListPartial: result.partial, guestListGenerated: generated, guestListSource:source, guestListNextCursor:result.nextPageToken || null });
+    return { ...result, guests, generated, source };
   },
   loadInvite: id => request(`/api/events/${encodeURIComponent(id)}/invite`),
   // Local preview actions never mutate live account information.
@@ -103,13 +104,3 @@ export const eventStore = {
   updateProfile(value) { if (mode === 'preview') return demoStore.updateProfile(value); },
   requestPlusOne(id) { if (mode === 'preview') return demoStore.requestPlusOne(id); },
 };
-
-// Fictional sample people; never inferred from contacts or the real event's attendees.
-export function generateGuestPreview(eventId) {
-  const names = ['Alex Morgan', 'Jordan Lee', 'Sam Rivera', 'Taylor Chen', 'Casey Davis', 'Riley Park', 'Jamie Wilson', 'Morgan Reed', 'Avery Brooks', 'Cameron Ellis', 'Drew Bennett', 'Quinn Patel', 'Charlie Hayes', 'Skyler James', 'Reese Carter', 'Parker Kim', 'Rowan Blake', 'Finley Scott', 'Emerson Lane', 'Sage Miller', 'Dakota Reed', 'Harper Quinn', 'Jules Monroe', 'Robin West'];
-  const seed = Array.from(String(eventId)).reduce((hash, char) => (Math.imul(hash, 31) + char.charCodeAt(0)) >>> 0, 7);
-  return Array.from({ length: 18 + seed % 7 }, (_, index) => ({
-    id: `generated-${eventId}-${index}`, name: names[(seed + index) % names.length],
-    status: (index + seed) % 4 === 0 ? 'maybe' : 'going', color: (index + seed) % 6, generated: true,
-  }));
-}

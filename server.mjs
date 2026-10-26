@@ -80,6 +80,7 @@ export function createDoorlistServer({ providerFactory = () => new DoorlistProvi
           res.setHeader('Set-Cookie', 'doorlist_session=; Max-Age=0; HttpOnly; SameSite=Strict; Path=/');
           return json(res, 200, { disconnected: true });
         }
+        if(req.method==='GET'&&url.pathname==='/api/profiles')return json(res,200,{profiles:needSession(req).provider.listProfiles(),scope:'signed-in-account'});
         if (req.method === 'GET' && url.pathname === '/api/events') return json(res, 200, await needSession(req).provider.syncEvents());
         const match = /^\/api\/events\/([\w-]{5,100})(?:\/(guests|invite))?$/.exec(url.pathname);
         if (req.method === 'GET' && match) {

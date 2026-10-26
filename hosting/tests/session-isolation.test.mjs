@@ -28,3 +28,15 @@ test('one account cannot read another account using an account ID query paramete
   const data=await response.json();
   assert.equal(data.profile.id,'account-a');
 });
+
+test('the saved profile dataset is encrypted and scoped to the signed-in account',async()=>{
+ const raw=crypto.randomUUID();
+ const id=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(raw))),b=>b.toString(16).padStart(2,'0')).join('');
+ const ciphertext=await encryptSession({provider:{profile:{id:'account-a'},allowedEvents:[],profilePool:[['person-a',{id:'person-a',name:'Account A cached person',photo:'https://images.example/a.jpg'}]]}},env,id);
+ assert.ok(!ciphertext.includes('Account A cached person'));
+ const runtime={...env,DB:{prepare(){return{bind(requestedId){return{first:async()=>requestedId===id?{ciphertext,expires_at:Date.now()+60000}:null};}};}}};
+ const response=await handleDoorlist(new Request('https://test.example/api/profiles?account=account-b',{headers:{Cookie:`doorlist_session=${raw}`}}),runtime);
+ assert.deepEqual((await response.json()).profiles,[{id:'person-a',name:'Account A cached person',photo:'https://images.example/a.jpg'}]);
+ const anonymous=await handleDoorlist(new Request('https://test.example/api/profiles'),runtime);
+ assert.equal(anonymous.status,401);
+});

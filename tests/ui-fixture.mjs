@@ -15,7 +15,7 @@ createDoorlistServer({port:4174,providerFactory:()=>({
   async syncEvents(){return {events,suggestedFriends:[{id:'friend-one',name:'Jordan Lee',photo:'',mutualFriends:20},{id:'friend-two',name:'Alex Morgan',photo:'',mutualEvents:3},{id:'friend-three',name:'Riley Park',photo:'',mutualFriends:12},{id:'friend-four',name:'Taylor Chen',photo:'',mutualFriends:6}],profile:this.profile,coverage:{invited:2,discoverable:1,partial:false},syncedAt:new Date().toISOString()};},
   async loadEvent(id){return {...events.find(event=>event.id===id),detailsLoaded:true};},
   async loadGuests(id,options={}){
-    if(id==='discover-fixture')return {guests:[],restricted:true,partial:false};
+    if(id==='discover-fixture')return {guests:[{id:'cached-profile',name:'Cached Actual Profile Fixture',photo:'https://invalid.example/profile.jpg',status:'unconfirmed'}],restricted:true,partial:false,source:'profile-cache'};
     const page=options.cursor?1:0;
     const guests=Array.from({length:180},(_,i)=>({id:`guest-${page*180+i}`,name:`Fixture Guest ${String(page*180+i).padStart(3,'0')}`,status:i%5===0?'invited':i%4===0?'maybe':'going',photo:'',color:i%6}));
     guests.splice(7,0,{id:'fixture-user',name:'Fixture User',status:'maybe',photo:'profile.png'});

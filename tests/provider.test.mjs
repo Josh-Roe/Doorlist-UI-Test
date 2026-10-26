@@ -62,7 +62,7 @@ test('guest lists follow pagination and keep authorization restrictions explicit
   const result = await p.loadGuests('event-123');
   assert.equal(pages, 2); assert.equal(result.guests.length, 2); assert.equal(result.partial, false);
   p.firestore = async () => { throw new ProviderError('Denied', 403); };
-  assert.deepEqual(await p.loadGuests('event-123'), { guests: [], restricted: true, partial: false });
+  assert.deepEqual(await p.loadGuests('event-123'), { guests: [], restricted: true, partial: false, nextPageToken:null, source:'profile-cache', attendanceVerified:false });
 });
 test('missing or inaccessible admission tickets use a labeled generated fallback', async () => {
   const p = provider(); p.allowedEvents.set('event-123', {});
@@ -143,10 +143,41 @@ test('guest pages expose an event-bound cursor and resolve photos by account ID'
   const p=provider();p.allowedEvents.set('event-paged',{});
   let seen;
   p.firestore=async(path,query)=>{seen={path,query};return {documents:[{name:'guests/account-one',fields:{name:{stringValue:'Guest One'}}}],nextPageToken:'page-two'};};
-  p.api=async(_path,options)=>{assert.deepEqual(JSON.parse(options.body).uuids,['account-one']);return {'account-one':{profilePictureUrl:'https://images.example/correct-account.jpg'}};};
+  p.api=async(_path,options)=>{assert.deepEqual(JSON.parse(options.body).uuids,['account-one']);return {'ACCOUNT-ONE':{profilePictureUrl:'https://images.example/correct-account.jpg'}};};
   const result=await p.loadGuests('event-paged',{cursor:'page-one',pageLimit:1,enrichPhotos:true});
   assert.equal(result.nextPageToken,'page-two');assert.equal(result.partial,true);
   assert.ok(seen.path.includes('event-paged/guests'));assert.ok(seen.query.includes('pageToken=page-one'));
   assert.equal(result.guests[0].photo,'https://images.example/correct-account.jpg');
   await assert.rejects(p.loadGuests('other-event',{cursor:'page-one'}),error=>error.status===404);
+});
+
+test('profile suggestions use only this account’s cached identities and never reuse another event’s RSVP',async()=>{
+ const a=provider(),b=provider();a.allowedEvents.set('missing-list',{});b.allowedEvents.set('missing-list',{});
+ a.rememberProfiles([{id:'account-a',name:'Person A',photo:'https://images.example/a.jpg',status:'going'},{id:'no-photo',name:'No Photo'},{id:'bad-photo',name:'Bad Photo',photo:'javascript:bad()'}]);
+ b.rememberProfiles([{id:'account-b',name:'Person B',photo:'https://images.example/b.jpg'}]);
+ a.firestore=async()=>{throw new ProviderError('Denied',403);};
+ const result=await a.loadGuests('missing-list');
+ assert.equal(result.source,'profile-cache');assert.equal(result.attendanceVerified,false);
+ assert.deepEqual(result.guests,[{id:'account-a',name:'Person A',photo:'https://images.example/a.jpg',status:'unconfirmed'}]);
+ assert.equal(b.profileSuggestions('missing-list').guests[0].id,'account-b');
+ assert.deepEqual(a.listProfiles()[0],{id:'account-a',name:'Person A',photo:'https://images.example/a.jpg'});
+ a.clear();assert.equal(a.listProfiles().length,0);
+});
+
+test('home cards load their own readable addresses rather than a shared default',async()=>{
+ const p=provider();const first=normalizeEvent(raw('first-event')),second=normalizeEvent(raw('second-event'));
+ p.api=async()=>({guests:[]});
+ p.firestore=async path=>({fields:{locationReadable:{mapValue:{fields:{streetNumber:{integerValue:path.includes('first-event')?'100':'200'},street:{stringValue:path.includes('first-event')?'First Street':'Second Street'},city:{stringValue:'Berkeley'},state:{stringValue:'CA'}}}}}});
+ await p.enrichEventPhotos([first,second]);
+ assert.equal(first.locationAddress,'100 First Street, Berkeley, CA');assert.equal(second.locationAddress,'200 Second Street, Berkeley, CA');
+});
+
+test('a new SMS sign-in cannot retain another account’s cached profiles or Firebase identity',async()=>{
+ const p=provider();p.allowedEvents.set('old-event',{});p.firebaseToken='old-firebase';
+ p.rememberProfiles([{id:'old-person',name:'Previous account person',photo:'https://images.example/old.jpg'}]);
+ p.fetch=async()=>Response.json({access_token:'new-access',refresh_token:'new-refresh',expires_in:3600});
+ p.api=async()=>({uuid:'new-account',name:'New Account',profilePicture:'https://images.example/new.jpg'});
+ await p.verifyCode('+15555550123','123456');
+ assert.equal(p.firebaseToken,null);assert.equal(p.allowedEvents.size,0);
+ assert.deepEqual(p.listProfiles().map(person=>person.id),['new-account']);
 });

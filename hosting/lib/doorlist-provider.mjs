@@ -70,7 +70,26 @@ function obfuscatePhone(phone) {
 export class DoorlistProvider {
   constructor({ fetchImpl = fetch, config = publishedConfig, clock = Date.now } = {}) {
     // Keep native fetch unbound to this provider; Workers requires its global receiver.
-    this.fetch = (...args) => fetchImpl(...args); this.config = config; this.clock = clock; this.allowedEvents = new Map();
+    this.fetch = (...args) => fetchImpl(...args); this.config = config; this.clock = clock; this.allowedEvents = new Map(); this.profilePool = new Map();
+  }
+  rememberProfiles(people) {
+    for(const person of people || []) {
+      const id=String(person.id || person.uuid || ''),name=String(person.name || '').trim(),photo=safeImage(person.photo || person.profilePicture || person.profilePictureUrl);
+      if(!id || !name || !photo || photo.length>2048)continue;
+      const key=id.toLowerCase();
+      this.profilePool.delete(key);
+      this.profilePool.set(key,{id,name:name.slice(0,200),photo});
+    }
+    while(this.profilePool.size>500)this.profilePool.delete(this.profilePool.keys().next().value);
+  }
+  listProfiles() { return [...this.profilePool.values()].map(person=>({...person})); }
+  profileSuggestions(eventId) {
+    this.requireEvent(eventId);
+    const people=this.listProfiles().filter(person=>person.id.toLowerCase()!==String(this.profile?.id||'').toLowerCase()).sort((a,b)=>a.id.localeCompare(b.id));
+    const seed=Array.from(eventId).reduce((hash,char)=>(Math.imul(hash,31)+char.charCodeAt(0))>>>0,7);
+    const offset=people.length?seed%people.length:0;
+    const guests=Array.from({length:Math.min(24,people.length)},(_,index)=>({...people[(offset+index)%people.length],status:'unconfirmed'}));
+    return {guests,restricted:true,partial:false,nextPageToken:null,source:'profile-cache',attendanceVerified:false};
   }
   async request(url, options = {}) {
     let response;
@@ -106,17 +125,20 @@ export class DoorlistProvider {
       method: 'POST', headers: this.authHeaders(), body: JSON.stringify({ phone, token: code, type: 'sms' }),
     });
     if (!session.access_token || !session.refresh_token) throw new ProviderError('Doorlist did not return a session.', 401);
+    // A new SMS sign-in starts a fresh account-scoped cache and Firebase identity.
+    this.clear();
     this.setSession(session);
     const user = await this.api(`/api/users/phone/${obfuscatePhone(phone)}`);
     if (!user.uuid || !user.name) { this.clear(); throw new ProviderError('An existing Doorlist account is required.', 404); }
     this.profile = { id: user.uuid, name: String(user.name), photo: safeImage(user.profilePicture) || 'profile.png' };
+    this.rememberProfiles([this.profile]);
     return this.profile;
   }
   setSession(session) {
     this.accessToken = session.access_token; this.refreshToken = session.refresh_token;
     this.expiresAt = this.clock() + Number(session.expires_in || 3600) * 1000;
   }
-  clear() { this.accessToken = null; this.refreshToken = null; this.firebaseToken = null; this.profile = null; this.allowedEvents.clear(); }
+  clear() { this.accessToken = null; this.refreshToken = null; this.firebaseToken = null; this.profile = null; this.allowedEvents.clear(); this.profilePool.clear(); }
   async token() {
     if (!this.accessToken) throw new ProviderError('Sign in to connect your Doorlist events.', 401);
     if (this.expiresAt < this.clock() + 60000) {
@@ -182,6 +204,7 @@ export class DoorlistProvider {
       const result = await this.api(`/api/recommendations?user_uuid=${encodeURIComponent(this.profile.id)}&forEvent=`);
       suggestedFriends = (Array.isArray(result.recommendations) ? result.recommendations : []).filter(person => person.uuid && person.name && !person.isFriendsWithUser && person.uuid !== this.profile.id).slice(0, 12).map(person => ({id:String(person.uuid), name:String(person.name), photo:safeImage(person.profilePicture || person.profilePictureUrl), mutualFriends:Number(person.mutualFriends) || 0, mutualEvents:Number(person.mutualEvents) || 0}));
     } catch { /* Recommendations are optional; never manufacture real account connections. */ }
+    this.rememberProfiles([this.profile,...suggestedFriends,...events.flatMap(event=>event.guestPreview||[])]);
     const eligible = own.value.eligibleEventCount ?? (own.value.events || []).length;
     const limited = eligible > (own.value.events || []).length;
     return { events, suggestedFriends, profile: this.profile, syncedAt: new Date(this.clock()).toISOString(), coverage: {
@@ -206,11 +229,16 @@ export class DoorlistProvider {
       })());
     }
     await Promise.all(events.slice(0, 20).map(async event => {
-      const [photo, circles] = await Promise.allSettled([
+      const [photo, circles, location] = await Promise.allSettled([
         hosts.get(event.hostId) || Promise.resolve(event.hostPhoto),
         this.api(`/api/event/${encodeURIComponent(event.id)}/circles`),
+        event.locationAddress ? Promise.resolve(null) : this.firestore(`eventObjects/${encodeURIComponent(event.id)}`),
       ]);
       if (photo.status === 'fulfilled' && photo.value) event.hostPhoto = photo.value;
+      if(location.status==='fulfilled'&&location.value?.fields) {
+        const fields=decodeFields(location.value.fields);
+        if(!fields.hideDetailsIfNotOnList || event.access==='invited')Object.assign(event,normalizeLocation(fields.locationReadable || fields.location));
+      }
       const rows = circles.status === 'fulfilled' ? (circles.value.guests || circles.value.attendees || []) : [];
       event.guestPreview = (Array.isArray(rows) ? rows : []).filter(person => person.name).slice(0,4).map(person => ({id:String(person.uuid || ''),name:String(person.name),photo:safeImage(person.profilePhotoUrl || person.profilePictureUrl || person.profilePicture)}));
     }));
@@ -230,7 +258,7 @@ export class DoorlistProvider {
     if (details.status === 'fulfilled') {
       const fields = decodeFields(details.value.fields);
       const normalized = normalizeEvent({ ...fields, eventId: id }, event.access);
-      if (normalized) event = { ...event, ...normalized, image: normalized.image || event.image, hostPhoto: normalized.hostPhoto || event.hostPhoto };
+      if (normalized) event = { ...event, ...normalized, image: normalized.image || event.image, hostPhoto: normalized.hostPhoto || event.hostPhoto, location:normalized.locationAddress?normalized.location:event.location, locationAddress:normalized.locationAddress||event.locationAddress };
     }
     if (guest.status === 'fulfilled') {
       const fields = decodeFields(guest.value.fields);
@@ -272,15 +300,17 @@ export class DoorlistProvider {
           const batch=missing.slice(index*100,index*100+100);
           try {
             const details=await this.api('/api/users/light_details',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({uuids:batch.map(person=>person.id)})});
-            for(const person of batch){const detail=details?.[person.id];person.photo=safeImage(detail?.profilePictureUrl || detail?.profilePicture || detail?.profilePhotoUrl);}
+            const byId=new Map(Object.entries(details||{}).map(([id,detail])=>[String(detail?.uuid||id).toLowerCase(),detail]));
+            for(const person of batch){const detail=byId.get(person.id.toLowerCase());person.photo=safeImage(detail?.profilePictureUrl || detail?.profilePicture || detail?.profilePhotoUrl);}
           }catch { /* An unavailable account photo keeps its local neutral avatar. */ }
         }));
       }
-      return { guests, restricted: false, partial: Boolean(pageToken), nextPageToken:pageToken || null };
+      this.rememberProfiles(guests);
+      return { guests, restricted: false, partial: Boolean(pageToken), nextPageToken:pageToken || null, source:'doorlist' };
     } catch (error) {
       if (error.status === 401) throw error;
-      if (![403, 404].includes(error.status)) throw error;
-      return { guests: [], restricted: true, partial: false };
+      if (![403,404].includes(error.status) && error.status<500)throw error;
+      return this.profileSuggestions(id);
     }
   }
   async loadInvite(id) {
