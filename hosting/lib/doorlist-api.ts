@@ -63,7 +63,8 @@ async function saveSession(session:any,env:Runtime) {
   const p=session.provider;
   const data={phone:session.phone,codeTime:session.codeTime,attempts:session.attempts,
     provider:{profile:p.profile,accessToken:p.accessToken,refreshToken:p.refreshToken,expiresAt:p.expiresAt,
-      firebaseToken:p.firebaseToken,firebaseExpiry:p.firebaseExpiry,allowedEvents:[...p.allowedEvents],profilePool:[...p.profilePool]}};
+      firebaseToken:p.firebaseToken,firebaseExpiry:p.firebaseExpiry,allowedEvents:[...p.allowedEvents],profilePool:[...p.profilePool],
+      suggestedFriends:p.suggestedFriends,coverage:p.coverage,syncedAt:p.syncedAt}};
   const cipher=await encryptSession(data,env,session.id);
   await env.DB!.prepare('INSERT INTO doorlist_sessions(id,ciphertext,expires_at) VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET ciphertext=excluded.ciphertext,expires_at=excluded.expires_at')
     .bind(session.id,cipher,Date.now()+12*3600000).run();
@@ -82,7 +83,11 @@ export async function handleDoorlist(request:Request,env:Runtime) {
       return reply({ready:Boolean(env.SESSION_ENCRYPTION_KEY),service:'doorlist-mobile',doorlistReachable});
     }
     session=await getSession(request,env);
-    if(request.method==='GET'&&url.pathname==='/api/session')return reply({authenticated:Boolean(session?.provider.profile),profile:session?.provider.profile||null});
+    if(request.method==='GET'&&url.pathname==='/api/session') {
+      if(!session?.provider.profile)return reply({authenticated:false,profile:null});
+      await saveSession(session,env);
+      return reply({authenticated:true,profile:session.provider.profile,snapshot:session.provider.snapshot()},200,{'Set-Cookie':cookie(session.raw,url.protocol==='https:')});
+    }
     if(request.method==='POST'&&url.pathname==='/api/auth/code') {
       await keyFor(env);
       const body=await readBody(request);

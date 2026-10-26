@@ -16,13 +16,13 @@ test('unavailable lists use actual cached profile suggestions; real lists stay r
   };
   await eventStore.initialize();
   const fallback = await eventStore.loadGuests('event-123');
-  assert.equal(fallback.generated,false);
+  assert.equal(fallback.generated,true);
   assert.equal(fallback.source,'profile-cache');
   assert.equal(fallback.guests[0].id,'cached-person');
   assert.ok(fallback.guests.length > 0);
   assert.equal(eventStore.getEvent('event-123').guestListSource,'profile-cache');
   responseType = 'network';
-  assert.equal((await eventStore.loadGuests('event-123')).guests.length,0);
+  assert.equal((await eventStore.loadGuests('event-123')).guests.length,1);
   responseType = 'real';
   const real = await eventStore.loadGuests('event-123');
   assert.equal(real.generated,false);

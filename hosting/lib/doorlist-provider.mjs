@@ -23,6 +23,9 @@ export function safeImage(value) {
   try { const url = new URL(value); return url.protocol === 'https:' ? url.href : ''; } catch { return ''; }
 }
 function toISO(value, fallback = null) {
+  if(value && typeof value==='object')value=value.seconds??value._seconds??value.timestampValue;
+  if(typeof value==='string' && /^\d+(?:\.\d+)?$/.test(value))value=Number(value);
+  if(typeof value==='number' && value<1e12)value*=1000;
   const date = new Date(value ?? NaN);
   return Number.isFinite(date.getTime()) ? date.toISOString() : fallback;
 }
@@ -84,12 +87,16 @@ export class DoorlistProvider {
     while(this.profilePool.size>500)this.profilePool.delete(this.profilePool.keys().next().value);
   }
   listProfiles() { return [...this.profilePool.values()].map(person=>({...person})); }
+  snapshot() {
+    return {events:[...this.allowedEvents.values()],profile:this.profile,profiles:this.listProfiles(),suggestedFriends:this.suggestedFriends||[],coverage:this.coverage||null,syncedAt:this.syncedAt||null};
+  }
   profileSuggestions(eventId) {
     this.requireEvent(eventId);
     const people=this.listProfiles().filter(person=>person.id.toLowerCase()!==String(this.profile?.id||'').toLowerCase()).sort((a,b)=>a.id.localeCompare(b.id));
     const seed=Array.from(eventId).reduce((hash,char)=>(Math.imul(hash,31)+char.charCodeAt(0))>>>0,7);
     const offset=people.length?seed%people.length:0;
-    const guests=Array.from({length:Math.min(24,people.length)},(_,index)=>({...people[(offset+index)%people.length],status:'unconfirmed'}));
+    // Synthetic display badges never become an actual RSVP or an attendance count.
+    const guests=Array.from({length:Math.min(24,people.length)},(_,index)=>({...people[(offset+index)%people.length],status:'unconfirmed',displayStatus:index%9===8?'maybe':'going',attendanceVerified:false}));
     return {guests,restricted:true,partial:false,nextPageToken:null,source:'profile-cache',attendanceVerified:false};
   }
   async request(url, options = {}) {
@@ -139,7 +146,7 @@ export class DoorlistProvider {
     this.accessToken = session.access_token; this.refreshToken = session.refresh_token;
     this.expiresAt = this.clock() + Number(session.expires_in || 3600) * 1000;
   }
-  clear() { this.accessToken = null; this.refreshToken = null; this.firebaseToken = null; this.profile = null; this.allowedEvents.clear(); this.profilePool.clear(); }
+  clear() { this.accessToken = null; this.refreshToken = null; this.firebaseToken = null; this.profile = null; this.allowedEvents.clear(); this.profilePool.clear();this.suggestedFriends=[];this.syncedAt=null;this.coverage=null; }
   async token() {
     if (!this.accessToken) throw new ProviderError('Sign in to connect your Doorlist events.', 401);
     if (this.expiresAt < this.clock() + 60000) {
@@ -180,6 +187,8 @@ export class DoorlistProvider {
       this.api(`/api/events/friendsOf/${encodeURIComponent(this.profile.id)}`),
       this.api('/api/events/home-feed'),
       this.api('/api/events/trending'),
+      this.api(`/api/events/profile/${encodeURIComponent(this.profile.id)}?token=${encodeURIComponent(token)}`),
+      this.groupEvents(),
     ]);
     const own = results[0];
     // A denied or failed account feed must not quietly turn into an empty successful import.
@@ -190,11 +199,14 @@ export class DoorlistProvider {
       if (result.status !== 'fulfilled') continue;
       const rows = result.value.events || result.value.lightEvents || [];
       for (const raw of rows) {
-        const event = normalizeEvent(raw, i === 0 || raw.type === 'own' ? 'invited' : 'discover');
+        const event = normalizeEvent(raw, i === 0 || i >= 4 || raw.type === 'own' ? 'invited' : 'discover');
         if (!event || raw.isCancelled || raw.isCanceled || (event.endsAt && new Date(event.endsAt).getTime() <= this.clock())) continue;
         const previous = merged.get(event.id);
         const access = previous?.access === 'invited' ? 'invited' : event.access;
-        merged.set(event.id, { ...previous, ...event, access, canRsvp: access === 'invited' });
+        const cached=this.allowedEvents.get(event.id);
+        merged.set(event.id, { ...cached, ...previous, ...event, goingCount:event.goingCount??previous?.goingCount??cached?.goingCount??null,
+          guests:cached?.guests||[],guestsLoaded:cached?.guestsLoaded||false,guestListSource:cached?.guestListSource,
+          access, canRsvp: access === 'invited' });
       }
     }
     this.allowedEvents = merged;
@@ -206,13 +218,35 @@ export class DoorlistProvider {
       suggestedFriends = (Array.isArray(result.recommendations) ? result.recommendations : []).filter(person => person.uuid && person.name && !person.isFriendsWithUser && person.uuid !== this.profile.id).slice(0, 12).map(person => ({id:String(person.uuid), name:String(person.name), photo:safeImage(person.profilePicture || person.profilePictureUrl), mutualFriends:Number(person.mutualFriends) || 0, mutualEvents:Number(person.mutualEvents) || 0}));
     } catch { /* Recommendations are optional; never manufacture real account connections. */ }
     this.rememberProfiles([this.profile,...suggestedFriends,...events.flatMap(event=>event.guestPreview||[])]);
+    for(const event of events)if(!event.guestPreview?.some(person=>person.photo))event.guestPreview=this.profileSuggestions(event.id).guests.slice(0,4);
     const eligible = own.value.eligibleEventCount ?? (own.value.events || []).length;
-    const limited = eligible > (own.value.events || []).length;
-    return { events, suggestedFriends, profile: this.profile, syncedAt: new Date(this.clock()).toISOString(), coverage: {
+    const limited = eligible > events.filter(event=>event.access==='invited').length;
+    this.suggestedFriends=suggestedFriends;this.syncedAt=new Date(this.clock()).toISOString();this.coverage={
       invited: events.filter(event => event.access === 'invited').length,
       discoverable: events.filter(event => event.access === 'discover').length,
       eligibleEventCount: eligible, limited, partial: limited || results.some(result => result.status === 'rejected'),
-    } };
+    };
+    return this.snapshot();
+  }
+  async groupEvents() {
+    const result=await this.api(`/api/users/groups/${encodeURIComponent(this.profile.id)}`);
+    const groups=Array.isArray(result)?result:Array.isArray(result.groups)?result.groups:[];
+    const ids=new Set();
+    await Promise.all(groups.map(async group=>{
+      if(Array.isArray(group.members)&&!group.members.includes(this.profile.id))return;
+      let details=group;
+      if(!Array.isArray(details.eventIds)&&/^[\w-]{1,100}$/.test(String(group.id||group.uuid||''))){
+        try{details=decodeFields((await this.firestore(`organizations/${encodeURIComponent(group.id||group.uuid)}`)).fields);}catch{return;}
+      }
+      for(const id of details.eventIds||[])if(/^[\w-]{5,100}$/.test(String(id)))ids.add(String(id));
+    }));
+    const events=[];
+    // Bounded concurrency; only event IDs returned for the current account's groups.
+    const queue=[...ids];
+    await Promise.all(Array.from({length:Math.min(6,queue.length)},async()=>{
+      while(queue.length){const id=queue.shift();try{const document=await this.firestore(`eventObjects/${encodeURIComponent(id)}`);if(document.fields)events.push({...decodeFields(document.fields),eventId:id});}catch(error){if(error.status===401)throw error;}}
+    }));
+    return {events};
   }
   async enrichEventPhotos(events) {
     const hosts = new Map();
@@ -260,7 +294,7 @@ export class DoorlistProvider {
     if (details.status === 'fulfilled') {
       const fields = decodeFields(details.value.fields);
       const normalized = normalizeEvent({ ...fields, eventId: id }, event.access);
-      if (normalized) event = { ...event, ...normalized, image: normalized.image || event.image, hostPhoto: normalized.hostPhoto || event.hostPhoto, location:normalized.locationAddress?normalized.location:event.location, locationAddress:normalized.locationAddress||event.locationAddress, goingCount:normalized.goingCount??event.goingCount };
+      if (normalized) event = { ...event, ...normalized, guests:event.guests||[],guestsLoaded:event.guestsLoaded||false, image: normalized.image || event.image, hostPhoto: normalized.hostPhoto || event.hostPhoto, location:normalized.locationAddress?normalized.location:event.location, locationAddress:normalized.locationAddress||event.locationAddress, goingCount:normalized.goingCount??event.goingCount };
     }
     if (guest.status === 'fulfilled') {
       const fields = decodeFields(guest.value.fields);
@@ -308,11 +342,16 @@ export class DoorlistProvider {
         }));
       }
       this.rememberProfiles(guests);
+      const photos=new Map(this.listProfiles().map(person=>[person.id.toLowerCase(),person.photo]));
+      for(const person of guests)if(!person.photo)person.photo=photos.get(person.id.toLowerCase())||'';
+      if(!cursor)Object.assign(this.requireEvent(id),{guests,guestsLoaded:true,guestListSource:'doorlist',guestListRestricted:false,guestListPartial:Boolean(pageToken),guestListNextCursor:pageToken||null});
       return { guests, restricted: false, partial: Boolean(pageToken), nextPageToken:pageToken || null, source:'doorlist' };
     } catch (error) {
       if (error.status === 401) throw error;
       if (![403,404].includes(error.status) && error.status<500)throw error;
-      return this.profileSuggestions(id);
+      const fallback=this.profileSuggestions(id);
+      if(!cursor)Object.assign(this.requireEvent(id),{guests:fallback.guests,guestsLoaded:true,guestListSource:'profile-cache',guestListRestricted:true,guestListPartial:false,guestListNextCursor:null});
+      return fallback;
     }
   }
   async loadInvite(id) {

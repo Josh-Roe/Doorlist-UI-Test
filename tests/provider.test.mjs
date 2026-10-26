@@ -27,7 +27,8 @@ test('event normalization preserves access distinction and rejects unsafe images
 });
 test('all event sources merge, deduplicate, sort, exclude ended events and retain invited status', async () => {
   const p = provider();
-  p.api = async path => path.includes('forUser') ? { events: [raw('own-event')], eligibleEventCount: 1 }
+  p.groupEvents=async()=>({events:[]});
+  p.api = async path => path.includes('/events/profile/') ? {lightEvents:[]} : path.includes('forUser') ? { events: [raw('own-event')], eligibleEventCount: 1 }
     : path.includes('friendsOf') ? { events: [raw('friend-event'), raw('own-event'), raw('past-event', { endTime: now - 1 })] }
     : path.includes('home-feed') ? { lightEvents: [raw('recent-event')] }
     : { events: [raw('trend-event'), raw('friend-event')] };
@@ -160,7 +161,7 @@ test('profile suggestions use only this account’s cached identities and never 
  a.firestore=async()=>{throw new ProviderError('Denied',403);};
  const result=await a.loadGuests('missing-list');
  assert.equal(result.source,'profile-cache');assert.equal(result.attendanceVerified,false);
- assert.deepEqual(result.guests,[{id:'account-a',name:'Person A',photo:'https://images.example/a.jpg',status:'unconfirmed'}]);
+ assert.deepEqual(result.guests,[{id:'account-a',name:'Person A',photo:'https://images.example/a.jpg',status:'unconfirmed',displayStatus:'going',attendanceVerified:false}]);
  assert.equal(b.profileSuggestions('missing-list').guests[0].id,'account-b');
  assert.deepEqual(a.listProfiles()[0],{id:'account-a',name:'Person A',photo:'https://images.example/a.jpg'});
  a.clear();assert.equal(a.listProfiles().length,0);
@@ -182,4 +183,30 @@ test('a new SMS sign-in cannot retain another account’s cached profiles or Fir
  await p.verifyCode('+15555550123','123456');
  assert.equal(p.firebaseToken,null);assert.equal(p.allowedEvents.size,0);
  assert.deepEqual(p.listProfiles().map(person=>person.id),['new-account']);
+});
+
+test('second timestamps, numeric strings and Firestore timestamps retain upcoming events',()=>{
+ for(const time of [(now+3600000)/1000,String(now+3600000),{seconds:(now+3600000)/1000}]){
+  assert.equal(normalizeEvent(raw('future-event',{time})).startsAt,new Date(now+3600000).toISOString());
+ }
+});
+test('account profile and permitted membership events fill gaps in the main feed',async()=>{
+ const p=provider();p.enrichEventPhotos=async()=>{};
+ p.api=async path=>path.includes('forUser')?{events:[raw('main-event')],eligibleEventCount:3}:
+ path.includes('/events/profile/')?{lightEvents:[raw('profile-only',{name:'MONSTER MOSH',time:(now+3600000)/1000})]}:
+ path.includes('/users/groups/')?[{id:'my-group',members:['my-user'],eventIds:['group-only']},{id:'other-group',members:['other-user'],eventIds:['forbidden-event']}]:{events:[]};
+ p.firestore=async path=>{assert.equal(path,'eventObjects/group-only');return{fields:{name:{stringValue:'Group event'},time:{integerValue:String(now+3600000)},endTime:{integerValue:String(now+7200000)}}};};
+ const result=await p.syncEvents();
+ assert.deepEqual(new Set(result.events.map(event=>event.id)),new Set(['main-event','profile-only','group-only']));
+ assert.equal(result.coverage.limited,false);
+ assert.ok(!p.allowedEvents.has('forbidden-event'));
+});
+test('cached profile badge mix is stable near eight to one and never alters actual RSVP data',()=>{
+ const p=provider();p.allowedEvents.set('event-cache',{});
+ p.rememberProfiles(Array.from({length:24},(_,i)=>({id:`person-${i}`,name:`Actual ${i}`,photo:`https://images.example/${i}.jpg`})));
+ const a=p.profileSuggestions('event-cache'),b=p.profileSuggestions('event-cache');
+ assert.deepEqual(a,b);assert.equal(a.guests.filter(p=>p.displayStatus==='maybe').length,2);
+ assert.ok(a.guests.every(p=>p.status==='unconfirmed'&&p.attendanceVerified===false));
+ assert.ok(p.listProfiles().every(p=>!('displayStatus' in p)));
+ assert.ok(!JSON.stringify(p.snapshot()).includes('test-session-only'));
 });

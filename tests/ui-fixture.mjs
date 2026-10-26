@@ -3,6 +3,7 @@ import { createDoorlistServer } from '../server.mjs';
 import { ProviderError } from '../doorlist-provider.mjs';
 import QRCode from 'qrcode';
 const now = Date.now();
+const profiles=Array.from({length:24},(_,i)=>({id:`cached-${i}`,name:`Cached Profile Fixture ${i}`,photo:'https://doorlist-mobile-josh-roe.fairrose12.chatgpt.site/mobile/profile.png'}));
 const events = ['invited-fixture','discover-fixture','official-fixture'].map((id, index) => ({
   id, title: ['Invited Test Event','Discover Test Event','Official Test Event'][index], host: 'Test Host', image:'', hostPhoto:'https://invalid.example/host.jpg',hostId:'fixture-host',guestPreview:[{id:'preview-one',name:'Test Guest',photo:'https://invalid.example/person.jpg'}], theme:'purple',
   startsAt:new Date(now+3600000).toISOString(), endsAt:new Date(now+7200000).toISOString(), location:'2647 Durant Avenue',locationAddress:'2647 Durant Avenue, Berkeley, CA',playlist:{url:'https://open.spotify.com/playlist/fixture',songCount:2}, description:'Integration fixture',
@@ -12,10 +13,11 @@ const events = ['invited-fixture','discover-fixture','official-fixture'].map((id
 createDoorlistServer({port:4174,providerFactory:()=>({
   profile:null, clear(){this.profile=null;}, async sendCode(){},
   async verifyCode(){this.profile={id:'fixture-user',name:'Fixture User',photo:'profile.png'};return this.profile;},
-  async syncEvents(){return {events,suggestedFriends:[{id:'friend-one',name:'Jordan Lee',photo:'',mutualFriends:20},{id:'friend-two',name:'Alex Morgan',photo:'',mutualEvents:3},{id:'friend-three',name:'Riley Park',photo:'',mutualFriends:12},{id:'friend-four',name:'Taylor Chen',photo:'',mutualFriends:6}],profile:this.profile,coverage:{invited:2,discoverable:1,partial:false},syncedAt:new Date().toISOString()};},
+  listProfiles(){return profiles;},
+  async syncEvents(){if(process.env.FIXTURE_SLOW_REFRESH)await new Promise(resolve=>setTimeout(resolve,3000));return {events,profiles,suggestedFriends:[{id:'friend-one',name:'Jordan Lee',photo:'',mutualFriends:20},{id:'friend-two',name:'Alex Morgan',photo:'',mutualEvents:3},{id:'friend-three',name:'Riley Park',photo:'',mutualFriends:12},{id:'friend-four',name:'Taylor Chen',photo:'',mutualFriends:6}],profile:this.profile,coverage:{invited:2,discoverable:1,partial:false},syncedAt:new Date().toISOString()};},
   async loadEvent(id){return {...events.find(event=>event.id===id),detailsLoaded:true};},
   async loadGuests(id,options={}){
-    if(id==='discover-fixture')return {guests:[{id:'cached-profile',name:'Cached Actual Profile Fixture',photo:'https://invalid.example/profile.jpg',status:'unconfirmed'}],restricted:true,partial:false,source:'profile-cache'};
+    if(id==='discover-fixture')return {guests:profiles.map((p,i)=>({...p,status:'unconfirmed',displayStatus:i%9===8?'maybe':'going',attendanceVerified:false})),restricted:true,partial:false,source:'profile-cache'};
     const page=options.cursor?1:0;
     const guests=Array.from({length:180},(_,i)=>({id:`guest-${page*180+i}`,name:`Fixture Guest ${String(page*180+i).padStart(3,'0')}`,status:i%5===0?'invited':i%4===0?'maybe':'going',photo:'',color:i%6}));
     guests.splice(7,0,{id:'fixture-user',name:'Fixture User',status:'maybe',photo:'profile.png'});

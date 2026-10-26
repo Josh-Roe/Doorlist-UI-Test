@@ -1,6 +1,6 @@
 import { eventStore } from './event-store.js';
 import { avatarFallback, profileImage } from './avatar.js';
-import { orderedGuests } from './guest-list.js';
+import { orderedGuests, guestDisplayStatus } from './guest-list.js';
 
 const app = document.getElementById('appView');
 const invite = document.getElementById('inviteView');
@@ -62,17 +62,25 @@ function dateParts(event) {
     endTime: new Date(event.endsAt).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}),
   };
 }
+const unavailablePhotos=new Set();
 function avatar(person, extra = '') {
   return `<img class="guest-avatar ${extra}" loading="lazy" decoding="async" src="${esc(profileImage(person))}" data-avatar-id="${esc(person.id || person.hostId || '')}" data-avatar-name="${esc(person.name || person.host || '')}" alt="">`;
 }
 function hostAvatar(event) { return avatar({id:event.hostId || event.host,name:event.host,photo:event.hostPhoto},'host-mark'); }
 function avatarStack(event) {
-  const people = event.guestPreview?.length ? event.guestPreview : event.guests;
+  const people = eventStore.previewPeople(event);
   return people?.length ? `<span class="avatar-stack" aria-hidden="true">${people.slice(0,4).map(person=>avatar(person)).join('')}</span>` : '';
 }
 document.addEventListener('error', event => {
   const image=event.target;
   if (!(image instanceof HTMLImageElement) || !image.hasAttribute('data-avatar-id') || image.dataset.fallbackApplied) return;
+  unavailablePhotos.add(image.getAttribute('src'));
+  if(image.closest('.avatar-stack')&&eventStore.mode!=='preview') {
+    const used=new Set([...image.closest('.avatar-stack').querySelectorAll('img')].map(node=>node.dataset.avatarId));
+    const replacement=eventStore.getProfiles().find(person=>!used.has(person.id)&&!unavailablePhotos.has(person.photo));
+    if(replacement){image.dataset.avatarId=replacement.id;image.dataset.avatarName=replacement.name;image.src=replacement.photo;return;}
+    image.hidden=true;return;
+  }
   image.dataset.fallbackApplied='true';
   image.src=avatarFallback(image.dataset.avatarId,image.dataset.avatarName);
 },true);
@@ -116,7 +124,7 @@ function gatheringSection() {
   return `<section class="home-section gathering-section"><h2>Get people together!</h2><p>Tap to make an event</p><div class="gathering-rail">${gatheringTemplates.map(template=>`<button class="gathering-card" data-action="event-template" data-template="${template.id}" aria-label="${esc(template.title)}. ${esc(template.description)}"><img class="native-template-art" loading="lazy" src="${template.image}" alt="">${template.motion?`<video class="template-video" data-template-video="${template.id}" muted loop autoplay playsinline preload="metadata" aria-hidden="true"><source src="${template.motion}" type="video/mp4"></video>`:''}</button>`).join('')}</div></section>`;
 }
 function hostTile(events) {
-  return `<button class="host-card" data-action="create"><svg class="host-card-outline" viewBox="0 0 236 236" preserveAspectRatio="none" aria-hidden="true"><rect x="1" y="1" width="234" height="234" rx="23" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="10 10" vector-effect="non-scaling-stroke"/></svg><span class="host-art poster-stack" aria-hidden="true">${events.slice(0,3).map(event=>`<span class="mini-poster">${poster(event)}</span>`).join('')}${events.length?'':icon('calendar')}</span><strong>Create your own event</strong><span>Host and invite your friends!</span></button>`;
+  return `<button class="host-card" data-action="create"><svg class="host-card-outline" viewBox="0 0 236 236" preserveAspectRatio="none" aria-hidden="true"><rect x="1" y="1" width="234" height="234" rx="23" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="10 10" vector-effect="non-scaling-stroke"/></svg><img class="native-host-art" src="assets/doorlist-host-stack.png" alt="" aria-hidden="true"><strong>Create your own event</strong><span>Host and invite your friends!</span></button>`;
 }
 function home() {
   const events=eventStore.listEvents();
@@ -174,11 +182,11 @@ function sharedPlaylistSection(event) {
   return `<section class="shared-playlist"><h2>${icon('spotify')}Shared Playlist</h2><div class="playlist-actions"><button data-action="playlist-add" data-id="${event.id}">${icon('plus')}Add a Song</button>${event.playlist?.url?`<a href="${esc(event.playlist.url)}" target="_blank" rel="noopener noreferrer">${icon('arrowUpRight')}Open Playlist</a>`:`<button disabled>${icon('arrowUpRight')}Open Playlist</button>`}</div></section>`;
 }
 function guestListPage(event) {
-  guestFilter = 'all'; guestQuery = ''; guestVisibleCount = GUEST_BATCH_SIZE; guestBatchError='';
-  return `<div class="guest-list-view">${topbar(`/event/${event.id}`)}<h1 class="sr-only">${esc(event.title)} guest list</h1><div class="guest-controls"><div class="segmented-control" role="group" aria-label="Filter guests">${[['all','All'],['going','Going'],['maybe','Maybe']].map(([id,label])=>`<button data-action="guest-filter" data-filter="${id}" aria-pressed="${id==='all'}">${label}</button>`).join('')}</div><label class="search-field">${icon('search')}<input id="guestSearch" type="search" placeholder="Search Guests" aria-label="Search guests" autocomplete="off"></label></div><div id="guestResults" class="guest-results" aria-live="polite">${guestRows(event)}</div><p class="preview-note">${guestSourceNote(event)}</p></div>`;
+  if(currentRoute!==`/event/${event.id}/guests`){guestFilter='all';guestQuery='';guestVisibleCount=GUEST_BATCH_SIZE;guestBatchError='';}
+  return `<div class="guest-list-view">${topbar(`/event/${event.id}`)}<h1 class="sr-only">${esc(event.title)} guest list</h1><div class="guest-controls"><div class="segmented-control" role="group" aria-label="Filter guests">${[['all','All'],['going','Going'],['maybe','Maybe']].map(([id,label])=>`<button data-action="guest-filter" data-filter="${id}" aria-pressed="${id===guestFilter}">${label}</button>`).join('')}</div><label class="search-field">${icon('search')}<input id="guestSearch" type="search" value="${esc(guestQuery)}" placeholder="Search Guests" aria-label="Search guests" autocomplete="off"></label></div><div id="guestResults" class="guest-results" aria-live="polite">${guestRows(event)}</div><p class="preview-note">${guestSourceNote(event)}</p></div>`;
 }
 function guestCandidates(event) {
-  return orderedGuests(event.guests,eventStore.getProfile()).filter(person=>{
+  return orderedGuests(event.guests,eventStore.getProfile()).map(person=>({...person,status:guestDisplayStatus(person)})).filter(person=>{
     const answered=['going','maybe','not-going'].includes(person.status);
     return (!event.guestListNextCursor || answered || guestFilter!=='all') &&
       (guestFilter==='all'||person.status===guestFilter) && person.name.toLowerCase().includes(guestQuery.toLowerCase());
@@ -229,6 +237,12 @@ function profilePage() {
   return `<div class="profile-view">${topbar('/','Your profile')}<img class="profile-main-photo" src="${esc(profile.photo)}" alt="Your profile photo"><h1>${esc(profile.name)}</h1><p class="muted">Your social calendar, all in one place.</p><div class="profile-stats"><div><strong>${eventStore.listEvents().length}</strong><span>Events</span></div><div><strong>${eventStore.listEvents().filter(event=>event.rsvp==='going').length}</strong><span>Going</span></div></div><a class="settings-link" href="#/events">${icon('calendar')}Your events${icon('next')}</a><button class="settings-link" data-action="settings">${icon('user')}Edit profile & invite${icon('next')}</button><button class="settings-link" data-action="connect">${icon('people')}${eventStore.authenticated ? 'Doorlist connection' : 'Connect Doorlist'}${icon('next')}</button>${nav('user')}</div>`;
 }
 const savedScroll = new Map();
+let pendingDataRender=false;
+function renderDataUpdate(){
+  if(activeTransition||dialog.open){pendingDataRender=true;return;}
+  pendingDataRender=false;render({background:true});
+}
+dialog.addEventListener('close',()=>{if(pendingDataRender)renderDataUpdate();});
 let activeTransition;
 function transitionKind(from,to) {
   if (to.endsWith('/invite')) return 'present';
@@ -244,8 +258,9 @@ function navigate() {
   document.documentElement.dataset.navigation=kind;
   activeTransition?.skipTransition?.();
   if(document.startViewTransition && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    activeTransition=document.startViewTransition(()=>render());
-    activeTransition.finished.catch(()=>{});
+    const transition=document.startViewTransition(()=>render());
+    activeTransition=transition;
+    transition.finished.catch(()=>{}).finally(()=>{if(activeTransition!==transition)return;activeTransition=null;if(pendingDataRender){pendingDataRender=false;renderDataUpdate();}});
   } else {
     render();
     if(!matchMedia('(prefers-reduced-motion: reduce)').matches) {
@@ -254,7 +269,9 @@ function navigate() {
     }
   }
 }
-function render() {
+function render({background=false}={}) {
+  const previousY=window.scrollY;
+  const rails=background?[...document.querySelectorAll('.coming-up-rail,.friends-rail,.gathering-rail')].map(node=>[node.className,node.scrollLeft]):[];
   let route;
   try { route = decodeURIComponent(location.hash.slice(1) || '/'); } catch { route = '/'; }
   const parts = route.split('/').filter(Boolean);
@@ -262,7 +279,7 @@ function render() {
   const qr = Boolean(event && parts[2]==='invite');
   guestObserver?.disconnect();
   document.querySelectorAll('.confetti-video,.template-video').forEach(video=>video.pause());
-  dialog.close();
+  if(!background)dialog.close();
   app.hidden = qr;
   invite.hidden = !qr;
   document.body.dataset.page = qr ? 'invite' : parts[0] || 'home';
@@ -285,6 +302,7 @@ function render() {
     if (!qr && app.querySelector('h1')) { app.querySelector('h1').tabIndex=-1; app.querySelector('h1').focus({preventScroll:true}); }
   }
   currentRoute = route;
+  if(background){window.scrollTo(0,previousY);for(const [className,left] of rails){const rail=document.getElementsByClassName(className)[0];if(rail)rail.scrollLeft=left;}}
   queueMicrotask(bindTemplateMotion);
   if(parts[2]==='guests')queueMicrotask(bindGuestScroll);
   if(!qr&&parts.length===0&&activeHeroId){const rail=document.querySelector('.coming-up-rail');const card=rail?.querySelector(`a[href="#/event/${activeHeroId}"]`);if(card)rail.scrollLeft=card.offsetLeft-rail.offsetLeft;}
@@ -371,7 +389,13 @@ window.addEventListener('invite:settings', event=>{
 });
 window.addEventListener('hashchange',navigate);
 render();
-eventStore.initialize().finally(render);
+eventStore.subscribe(renderDataUpdate);
+eventStore.initialize();
+let lastAutoRefresh=Date.now();
+function backgroundRefresh(){if(eventStore.authenticated&&!document.hidden&&Date.now()-lastAutoRefresh>60000){lastAutoRefresh=Date.now();eventStore.refresh().catch(()=>{});}}
+window.addEventListener('online',backgroundRefresh);
+document.addEventListener('visibilitychange',backgroundRefresh);
+setInterval(backgroundRefresh,60000);
 
 function connectionNote() {
   if (eventStore.mode === 'preview') return 'Sample events · Connect Doorlist for your live events.';
@@ -420,9 +444,11 @@ async function refreshEvents() {
 }
 async function hydrateEventRoute(event, guests) {
   const key = `${event.id}:${guests ? 'guests' : 'details'}`;
-  if (hydrating.has(key) || (guests ? event.guestsLoaded : event.detailsLoaded)) return;
+  if (!eventStore.authenticated || hydrating.has(key) || (guests ? event.guestsLoaded&&!event.guestListStale : event.detailsLoaded&&!event.detailsStale)) return;
   hydrating.add(key);
   try {
+    if(eventStore.refreshing)await eventStore.refresh();
+    if(location.hash.slice(1)!==`/event/${event.id}${guests?'/guests':''}`)return;
     if (guests) await eventStore.loadGuests(event.id);
     else await eventStore.loadEvent(event.id);
     const route = `/event/${event.id}${guests ? '/guests' : ''}`;
@@ -431,7 +457,7 @@ async function hydrateEventRoute(event, guests) {
       const loaded = eventStore.getEvent(event.id);
       document.getElementById('guestResults').innerHTML = guestRows(loaded);bindGuestScroll();
       document.querySelector('.guest-list-view>.preview-note').textContent = guestSourceNote(loaded);
-    } else render();
+    } else renderDataUpdate();
   } catch (error) {
     if (!eventStore.authenticated) { location.hash='/'; render(); notify(error.message); return; }
     if (guests && document.getElementById('guestResults')) document.getElementById('guestResults').innerHTML = empty('Guest list could not load', error.message, 'people');
