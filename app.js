@@ -3,11 +3,11 @@ import { eventStore } from './event-store.js';
 import { avatarFallback, profileImage } from './avatar.js';
 import { orderedGuests, guestDisplayStatus } from './guest-list.js';
 
-const app = document.getElementById('appView');
+let app = document.getElementById('appView');
 const invite = document.getElementById('inviteView');
 const dialog = document.getElementById('actionDialog');
 const toast = document.getElementById('toast');
-const pageNavigation=createPageNavigation({app,invite,onActivity:updateConfettiPlayback,onSettled:()=>{if(pendingDataRender)renderDataUpdate();scheduleBackPage();},getMeta:()=>({revision:screenRevision,guestFilter,guestQuery,guestVisibleCount,guestBatchError}),getBackTarget:backTarget,onBack:goBack});
+const pageNavigation=createPageNavigation({app,invite,onActivate:content=>{app=content;},onActivity:updateConfettiPlayback,onSettled:()=>{if(pendingDataRender)renderDataUpdate();scheduleBackPage();},getMeta:()=>({revision:screenRevision,guestFilter,guestQuery,guestVisibleCount,guestBatchError}),getBackTarget:backTarget,onBack:goBack});
 const icons = {
   back: '<path d="m14 5-7 7 7 7"/>',
   next: '<path d="m9 5 7 7-7 7"/>',
@@ -142,21 +142,26 @@ function home() {
     <section class="home-section your-events"><a class="section-heading" href="#/events"><h2>Your events</h2>${icon('next')}</a><div class="hosting-rail">${hostTile(events)}</div></section>
     ${swayAdvertisement()}${suggestedFriendsSection()}${gatheringSection()}${nav()}</div>`;
 }
-function confettiBackground() {
-  const reduceMotion=matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const video='https://storage.googleapis.com/doorlist-b6a3f.appspot.com/videoThemes/purple-confetti_1777411740084_gb1xercrd4g.mp4';
-  const poster='https://storage.googleapis.com/doorlist-b6a3f.appspot.com/themeStills/purple-confetti.jpg';
-  return `<div class="confetti-field" aria-hidden="true">${reduceMotion ? `<img class="confetti-still" src="${poster}" alt="">` : `<video class="confetti-video" autoplay muted loop playsinline preload="metadata" poster="${poster}"><source src="${video}" type="video/mp4"></video>`}${Array.from({length:28},(_,i)=>`<i style="--x:${(i*37+13)%100}%;--y:${(i*53)%100}%;--delay:${-(i*1.13)}s;--duration:${12+i%9}s;--angle:${i*43}deg;--confetti-color:${['#ae75ff','#f68fe5','#7ac3ff','#f9ce75','#8feac9'][i%5]}"></i>`).join('')}</div>`;
+function confettiBackground(event) {
+  const background=event.background || {
+    url:'https://storage.googleapis.com/doorlist-b6a3f.appspot.com/videoThemes/purple-confetti_1777411740084_gb1xercrd4g.mp4',
+    poster:'https://storage.googleapis.com/doorlist-b6a3f.appspot.com/themeStills/purple-confetti.jpg',kind:'video',isDark:true,
+  };
+  const still=background.poster||background.url;
+  const media=background.kind==='video'
+    ? `<video class="confetti-video" muted loop playsinline preload="metadata" poster="${esc(still)}"><source src="${esc(background.url)}" type="video/mp4"></video>`
+    : `<img class="event-background-image" src="${esc(background.url)}" alt="" decoding="async">`;
+  return `<div class="confetti-field" data-theme-url="${esc(background.url)}" data-theme-kind="${esc(background.kind)}" aria-hidden="true"><img class="confetti-still" src="${esc(still)}" alt="">${media}</div>`;
 }
 document.addEventListener('playing',event=>{
   if(event.target.matches?.('.confetti-video'))event.target.closest('.confetti-field')?.classList.add('video-ready');
 },true);
 const motionPreference=matchMedia('(prefers-reduced-motion: reduce)');
 function updateConfettiPlayback() {
-  document.querySelectorAll('.avatar-stack').forEach(stack=>stack.style.setProperty('--avatars-play-state',document.hidden||document.documentElement.dataset.pageMoving||!stack.dataset.inView?'paused':'running'));
+  document.querySelectorAll('.avatar-stack').forEach(stack=>stack.style.setProperty('--avatars-play-state',!app.contains(stack)||document.hidden||document.documentElement.dataset.pageMoving||!stack.dataset.inView?'paused':'running'));
   document.querySelectorAll('.confetti-video,.template-video').forEach(video=>{
-    if(document.hidden || document.documentElement.dataset.pageMoving || motionPreference.matches || app.hidden || (video.matches('.template-video')&&!video.dataset.inView))video.pause();
-    else video.play().catch(()=>{});
+    if(!app.contains(video) || document.body.dataset.page==='invite' || document.hidden || document.documentElement.dataset.pageMoving || motionPreference.matches || (video.matches('.template-video')&&!video.dataset.inView))video.pause();
+    else {video.muted=true;video.playsInline=true;video.play().catch(()=>{});}
   });
 }
 motionPreference.addEventListener('change',updateConfettiPlayback);
@@ -168,7 +173,7 @@ function bindTemplateMotion() {
     for(const entry of entries){const video=entry.target;if(entry.isIntersecting)video.dataset.inView='true';else delete video.dataset.inView;}
     updateConfettiPlayback();
   },{rootMargin:'120px'});
-  document.querySelectorAll('.template-video,.avatar-stack').forEach(target=>templateVideoObserver.observe(target));
+  app.querySelectorAll('.template-video,.avatar-stack').forEach(target=>templateVideoObserver.observe(target));
   updateConfettiPlayback();
 }
 function eventRow(event) {
@@ -177,7 +182,7 @@ function eventRow(event) {
 function eventPage(event) {
   const date = dateParts(event);
   const going = event.goingCount ?? (event.guests.filter(guest=>guest.status==='going').length + (event.source !== 'doorlist' && event.rsvp==='going' ? 1 : 0));
-  return `<div class="event-view theme-${esc(event.theme)}">${confettiBackground()}${topbar('/', '', `<button class="glass-button" data-action="event-menu" data-id="${event.id}" aria-label="Event options">${icon('more')}</button>`)}
+  return `<div class="event-view theme-${esc(event.theme)}${event.background?.isDark===false?' background-is-light':''}">${confettiBackground(event)}${topbar('/', '', `<button class="glass-button" data-action="event-menu" data-id="${event.id}" aria-label="Event options">${icon('more')}</button>`)}
     <h1 class="event-title">${esc(event.title)}</h1><div class="detail-poster">${poster(event)}</div>
     <a class="guest-summary glass-panel" href="#/event/${event.id}/guests">${avatarStack(event)}<span><strong>Guest List</strong><small>${going} going</small></span><span class="see-all">See All ${icon('next')}</span></a>
     <section class="event-info"><div class="info-line"><span class="info-icon">${icon('calendar')}</span><div><span>Date</span><strong>${date.full}</strong><p>${date.time} – ${date.endTime}</p></div></div><div class="info-line">${hostAvatar(event)}<div><span>Hosted by</span><strong>${esc(event.host)}</strong></div></div><div class="info-line"><span class="info-icon">${icon('pin')}</span><div><span>Location</span><strong>${esc(event.location)}</strong>${event.locationAddress?`<a class="location-link" href="https://maps.apple.com/?q=${encodeURIComponent(event.locationAddress)}" target="_blank" rel="noopener noreferrer">${esc(event.locationAddress)}</a>`:''}</div></div></section>
@@ -218,10 +223,10 @@ function bindGuestScroll() {
   guestObserver.observe(sentinel);
 }
 function repaintGuests(event) {
-  const anchor=Array.from(document.querySelectorAll('.guest-row')).find(row=>row.getBoundingClientRect().bottom>140);
+  const anchor=Array.from(app.querySelectorAll('.guest-row')).find(row=>row.getBoundingClientRect().bottom>140);
   const id=anchor?.dataset.guestId, top=anchor?.getBoundingClientRect().top;
   patchSurface(document.getElementById('guestResults'),guestRows(event));
-  if(id){const next=Array.from(document.querySelectorAll('.guest-row')).find(row=>row.dataset.guestId===id);if(next)pageNavigation.scroller.scrollBy(0,next.getBoundingClientRect().top-top);}
+  if(id){const next=Array.from(app.querySelectorAll('.guest-row')).find(row=>row.dataset.guestId===id);if(next)pageNavigation.scroller.scrollBy(0,next.getBoundingClientRect().top-top);}
   bindGuestScroll();
 }
 async function loadNextGuestBatch(id) {
@@ -271,12 +276,13 @@ function scheduleBackPage() {
   if(warmBackTask)return;
   warmBackTask=setTimeout(()=>{
     warmBackTask=0;if(pageNavigation.moving||eventStore.status==='loading')return;
-    const target=backTarget();if(!target||pageNavigation.has(target))return;
+    const target=backTarget();if(!target){pageNavigation.prepareBack(null);return;}
+    if(pageNavigation.has(target)){pageNavigation.prepareBack(target);return;}
     const event=target.startsWith('/event/')?eventStore.getEvent(target.split('/')[2]):null;
     if(target!=='/'&&!event)return;
     pageNavigation.prime(target,target==='/'?home():eventPage(event),{revision:screenRevision,guestFilter:'all',guestQuery:'',guestVisibleCount:GUEST_BATCH_SIZE,guestBatchError:''});
-    pageNavigation.syncVisibility();
-  },120);
+    pageNavigation.prepareBack(target);
+  },80);
 }
 document.addEventListener('click',event=>{
   const back=event.target.closest('a[aria-label="Back"]');
@@ -302,7 +308,8 @@ function patchSurface(parent,html) {
   function patch(oldNode,newNode) {
     if(oldNode.nodeType!==newNode.nodeType||oldNode.nodeName!==newNode.nodeName){oldNode.replaceWith(newNode.cloneNode(true));return;}
     if(oldNode.nodeType!==1){if(oldNode.nodeValue!==newNode.nodeValue)oldNode.nodeValue=newNode.nodeValue;return;}
-    if(oldNode.matches('video,.confetti-field'))return;
+    if(oldNode.matches('.confetti-field')){if(oldNode.dataset.themeUrl!==newNode.dataset.themeUrl||oldNode.dataset.themeKind!==newNode.dataset.themeKind)oldNode.replaceWith(newNode.cloneNode(true));return;}
+    if(oldNode.matches('video'))return;
     for(const attr of [...oldNode.attributes])if(!newNode.hasAttribute(attr.name)&&!attr.name.startsWith('data-fallback'))oldNode.removeAttribute(attr.name);
     for(const attr of [...newNode.attributes])if(oldNode.getAttribute(attr.name)!==attr.value&&!(oldNode===document.activeElement&&attr.name==='value'))oldNode.setAttribute(attr.name,attr.value);
     reconcile(oldNode,newNode);
@@ -321,7 +328,7 @@ function patchSurface(parent,html) {
 }
 function render({background=false}={}) {
   const previousY=pageNavigation.scroller.scrollTop;
-  const rails=background?[...document.querySelectorAll('.coming-up-rail,.friends-rail,.gathering-rail')].map(node=>[node.className,node.scrollLeft]):[];
+  const rails=background?[...app.querySelectorAll('.coming-up-rail,.friends-rail,.gathering-rail')].map(node=>[node.className,node.scrollLeft]):[];
   let route;
   try { route = decodeURIComponent(location.hash.slice(1) || '/'); } catch { route = '/'; }
   const parts = route.split('/').filter(Boolean);
@@ -332,8 +339,8 @@ function render({background=false}={}) {
   if(!background)dialog.close();
   app.hidden = qr;
   invite.hidden = !qr;
-  pageNavigation.syncVisibility();
   document.body.dataset.page = qr ? 'invite' : parts[0] || 'home';
+  pageNavigation.syncVisibility();
   if (qr) {
     if(!background)window.InviteView.show(event,eventStore.getProfile(), { live: event.source === 'doorlist' });
     document.title = `${event.title} — Your invite`;
@@ -358,11 +365,12 @@ function render({background=false}={}) {
     if (!qr && app.querySelector('h1')) { app.querySelector('h1').tabIndex=-1; app.querySelector('h1').focus({preventScroll:true}); }
   }
   currentRoute = route;
-  if(background){pageNavigation.scroller.scrollTo(0,previousY);for(const [className,left] of rails){const rail=document.getElementsByClassName(className)[0];if(rail)rail.scrollLeft=left;}}
+  if(background){pageNavigation.scroller.scrollTo(0,previousY);for(const [className,left] of rails){const rail=app.getElementsByClassName(className)[0];if(rail)rail.scrollLeft=left;}}
   queueMicrotask(bindTemplateMotion);
   if(parts[2]==='guests')queueMicrotask(bindGuestScroll);
-  if(!qr&&parts.length===0&&activeHeroId){const rail=document.querySelector('.coming-up-rail');const card=rail?.querySelector(`a[href="#/event/${activeHeroId}"]`);if(card)rail.scrollLeft=card.offsetLeft-rail.offsetLeft;}
+  if(!qr&&parts.length===0&&activeHeroId){const rail=app.querySelector('.coming-up-rail');const card=rail?.querySelector(`a[href="#/event/${activeHeroId}"]`);if(card)rail.scrollLeft=card.offsetLeft-rail.offsetLeft;}
   if (event?.source === 'doorlist' && !qr) hydrateEventRoute(event, parts[2] === 'guests');
+  if(!qr)pageNavigation.didRender(route);
   pageNavigation.syncVisibility();scheduleBackPage();
 }
 function dismissDialog() {
@@ -411,7 +419,7 @@ document.addEventListener('click', async event => {
   if (action==='guest-filter') {
     guestFilter = button.dataset.filter;
     guestVisibleCount = GUEST_BATCH_SIZE;
-    document.querySelectorAll('[data-action="guest-filter"]').forEach(item=>item.setAttribute('aria-pressed',String(item===button)));
+    app.querySelectorAll('[data-action="guest-filter"]').forEach(item=>item.setAttribute('aria-pressed',String(item===button)));
     const event = eventStore.getEvent(location.hash.split('/')[2]);
     patchSurface(document.getElementById('guestResults'),guestRows(event));bindGuestScroll();
   }
@@ -514,7 +522,7 @@ async function hydrateEventRoute(event, guests) {
     if (guests) {
       const loaded = eventStore.getEvent(event.id);
       patchSurface(document.getElementById('guestResults'),guestRows(loaded));bindGuestScroll();
-      document.querySelector('.guest-list-view>.preview-note').textContent = guestSourceNote(loaded);
+      app.querySelector('.guest-list-view>.preview-note').textContent = guestSourceNote(loaded);
     } else renderDataUpdate();
   } catch (error) {
     if (!eventStore.authenticated) { location.hash='/'; render(); notify(error.message); return; }

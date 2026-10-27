@@ -409,3 +409,28 @@ html[data-page-moving] .page-frame :is(.confetti-field i,.guest-avatar,.guest-lo
 .bottom-dock .dock-tabs { height:57px; }
 .bottom-dock::before { content:''; position:absolute; z-index:-1; left:-16px; right:-16px; bottom:0; height:calc(105px + env(safe-area-inset-bottom,0px)); background:linear-gradient(transparent,var(--app-bg) 80%); pointer-events:none; }
 .page-frame #inviteView { min-height:100%; }
+
+/* iPhone standalone bounds and footer chrome are independent of the scrolling content. */
+.page-frame { top:var(--app-visible-top,0px); bottom:auto; height:var(--app-visible-height,100dvh); transform:translate3d(0,0,0); backface-visibility:hidden; -webkit-backface-visibility:hidden; }
+.page-chrome { position:absolute; inset:0; z-index:40; pointer-events:none; }
+.page-chrome svg { width:24px; height:24px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; flex-shrink:0; }
+.page-chrome .bottom-dock,.page-chrome .event-dock { position:absolute; bottom:0; }
+.page-chrome .bottom-dock { pointer-events:auto; }
+.page-frame[data-current="false"] .mobile-app { pointer-events:none; }
+
+/* Preserve the event's own Doorlist media and freeze decorative media during a slide. */
+.confetti-field { height:var(--app-visible-height,100dvh); }
+.confetti-still,.confetti-video,.event-background-image { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+.confetti-video { opacity:0; }
+.video-ready .confetti-video { opacity:1; }
+html[data-page-moving] .event-background-image { visibility:hidden; }
+.background-is-light .event-title { color:#362002; }
+.background-is-light .event-info { color:#241b14; }
+.background-is-light .info-line :is(span,p),.background-is-light .info-icon { color:#473a2d; }
+.background-is-light .about-event { padding:14px; margin-inline:16px; border-radius:18px; background:#0008; color:white; }
+@media (prefers-reduced-motion:reduce) { .event-background-image { display:none; } }
+
+.page-stage { position:fixed; top:var(--app-visible-top,0px); bottom:auto; left:0; right:0; width:100%; max-width:480px; height:var(--app-visible-height,100dvh); margin-inline:auto; overflow:hidden; contain:strict; isolation:isolate; }
+.page-stage>.page-frame { position:absolute; inset:0; width:100%; height:100%; margin:0; }
+/* Freeze expensive live glass sampling while whole screens move. */
+html[data-page-moving] .page-frame :is(.glass-button,.glass-panel,.dock-tabs,.event-dock-button) { backdrop-filter:none; -webkit-backdrop-filter:none; }

@@ -23,6 +23,58 @@ export function decodeFields(fields = {}) {
 export function safeImage(value) {
   try { const url = new URL(value); return url.protocol === 'https:' ? url.href : ''; } catch { return ''; }
 }
+// Native stock themes omit isThemeDark on some event feeds. These light-theme
+// slugs come from Doorlist's public theme metadata; an event's own flag wins.
+const lightStockThemes = new Set([
+  'beer', 'beige-wallpaper', 'g-blue', 'blue-cartoon', 'champagne-preview-1',
+  'champagne--preview-2-', 'clouds---sky', 'crinkled-paper', 'film-screen',
+  'flower-wallpaper', 'g-turquoise', 'g-green', 'g-light-blue',
+  'neon-sunset-road', 'g-orange', 'pastel-watercolor', 'g-pink', 'pink-blue-shapes',
+  'pink-orange-bubbles', 'pink-watercolor', 'pool', 'pulsing-heart', 'g-purple',
+  'purple-ecoli', 'purple-yellow-gradient', 'rainbow-gradient', 'rotating-sun',
+  'white-falling-snow', 'g-yellow',
+]);
+const stockPosterNames = {
+  'black-waves--new-':'black-waves-new', 'g-blue':'blue', 'bodybuilder---':'bodybuilder-',
+  'champagne--preview-2-':'champagne-preview-2',
+  'clouds---sky':'clouds--sky', 'g-turquoise':'gradients---turcoise',
+  'g-green':'green', 'g-light-blue':'light-blue', 'neon-pink-blue-frame':'neon-pinkblue-frame',
+  'g-orange':'orange', 'g-pink':'pink', 'g-purple':'purple',
+  'purple-gradient-floor':'purple-gradient-floo', 'purple-yellow-gradient':'purple-yellow-gradie',
+  'g-red':'red', 'red-yellow-neon-frame':'red-yellow-neon-fram', 'g-yellow':'yellow',
+  // Shared filename prefixes need their complete native media identity.
+  'champagne_1777392502288_6but6bb2f7m.mp4':'champagne-preview-1',
+  'theme_1776822775731_f96vxc8q535.mp4':'dark-blue-bubbles',
+  'theme_1776822097725_xu5hd54dn7j.mp4':'pink-watercolor',
+  'theme_1776820063280_3a1xa30zu53.mp4':'sunset-road',
+};
+function safeBackgroundURL(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && !url.username && !url.password ? url.href : '';
+  } catch { return ''; }
+}
+export function normalizeBackground(event = {}, previous = null) {
+  const url = safeBackgroundURL(event.themeURL);
+  if (!url) return null;
+  const parsed = new URL(url);
+  const kind = /\.(mp4|webm|mov|m4v)$/i.test(parsed.pathname) ? 'video' : 'image';
+  const stock = parsed.origin === 'https://storage.googleapis.com'
+    && parsed.pathname.match(/^\/doorlist-b6a3f\.appspot\.com\/videoThemes\/([\w-]+)_\d+_[\w-]+\.(?:mp4|webm|mov|m4v)$/i);
+  const stockSlug = stock && (stockPosterNames[parsed.pathname.split('/').at(-1)] || stock[1]);
+  const posterSlug = stock && (stockPosterNames[stockSlug] || stockSlug);
+  const cached = previous?.url === url ? previous : null;
+  let poster = safeBackgroundURL(event.themeFirstFrame) || safeBackgroundURL(cached?.poster);
+  if (!poster && stock) poster = `${parsed.origin}/doorlist-b6a3f.appspot.com/themeStills/${posterSlug}.jpg`;
+  if (!poster && /(^|\.)giphy\.com$/i.test(parsed.hostname) && /\/giphy\.gif$/i.test(parsed.pathname)) {
+    const still = new URL(url);
+    still.pathname = still.pathname.replace(/\/giphy\.gif$/i, '/giphy_s.gif');
+    poster = still.href;
+  }
+  const isDark = typeof event.isThemeDark === 'boolean' ? event.isThemeDark
+    : typeof cached?.isDark === 'boolean' ? cached.isDark : !lightStockThemes.has(stockSlug);
+  return { url, kind, poster, isDark };
+}
 function toISO(value, fallback = null) {
   if(value && typeof value==='object')value=value.seconds??value._seconds??value.timestampValue;
   if(typeof value==='string' && /^\d+(?:\.\d+)?$/.test(value))value=Number(value);
@@ -57,7 +109,7 @@ export function normalizeEvent(event, access = 'discover') {
     hostId: String(event.orgFBid || event.orgID || event.hostID || ''),
     hostPhoto: safeImage(event.orgCoverPhoto || event.hostPhoto || event.hostProfilePicture),
     image: safeImage(event.eventCoverCroppedURL || event.eventCoverURL || event.coverPhotoURL),
-    theme: 'purple', startsAt: start, endsAt: end,
+    theme: 'purple', background: normalizeBackground(event), startsAt: start, endsAt: end,
     ...normalizeLocation(event.locationReadable && Object.values(event.locationReadable).some(Boolean) ? event.locationReadable : event.location, String(event.locationName || event.address || '')),
     goingCount:event.goingCount!=null&&Number.isInteger(Number(event.goingCount))&&Number(event.goingCount)>=0?Number(event.goingCount):null,
     description: String(event.description || ''), rsvp: 'invited', canRsvp: access === 'invited',
@@ -207,6 +259,7 @@ export class DoorlistProvider {
         const access = previous?.access === 'invited' ? 'invited' : event.access;
         const cached=this.allowedEvents.get(event.id);
         merged.set(event.id, { ...cached, ...previous, ...event, goingCount:event.goingCount??previous?.goingCount??cached?.goingCount??null,
+          background:normalizeBackground(raw,previous?.background||cached?.background)||previous?.background||cached?.background||null,
           guests:cached?.guests||[],guestsLoaded:cached?.guestsLoaded||false,guestListSource:cached?.guestListSource,
           access, canRsvp: access === 'invited' });
       }
@@ -294,13 +347,17 @@ export class DoorlistProvider {
       const [photo, circles, location] = await Promise.allSettled([
         hosts.get(event.hostId) || Promise.resolve(event.hostPhoto),
         this.api(`/api/event/${encodeURIComponent(event.id)}/circles`),
-        event.locationAddress && event.goingCount!=null ? Promise.resolve(null) : this.firestore(`eventObjects/${encodeURIComponent(event.id)}`),
+        event.locationAddress && event.goingCount!=null && event.background ? Promise.resolve(null) : this.firestore(`eventObjects/${encodeURIComponent(event.id)}`),
       ]);
       if (photo.status === 'fulfilled' && photo.value) event.hostPhoto = photo.value;
       if(location.status==='fulfilled'&&location.value?.fields) {
         const fields=decodeFields(location.value.fields);
+        event.background=normalizeBackground(fields,event.background)||event.background||null;
         if(fields.goingCount!=null&&Number.isInteger(Number(fields.goingCount))&&Number(fields.goingCount)>=0)event.goingCount=Number(fields.goingCount);
-        if(!fields.hideDetailsIfNotOnList || event.access==='invited')Object.assign(event,normalizeLocation(fields.locationReadable || fields.location));
+        if(!fields.hideDetailsIfNotOnList || event.access==='invited') {
+          const location=normalizeLocation(fields.locationReadable || fields.location,String(fields.locationName || fields.address || ''));
+          if(location.locationAddress)Object.assign(event,location);
+        }
       }
       const rows = circles.status === 'fulfilled' ? (circles.value.guests || circles.value.attendees || []) : [];
       event.guestPreview = (Array.isArray(rows) ? rows : []).filter(person => person.name).slice(0,4).map(person => ({id:String(person.uuid || ''),name:String(person.name),photo:safeImage(person.profilePhotoUrl || person.profilePictureUrl || person.profilePicture)}));
@@ -321,7 +378,7 @@ export class DoorlistProvider {
     if (details.status === 'fulfilled') {
       const fields = decodeFields(details.value.fields);
       const normalized = normalizeEvent({ ...fields, eventId: id }, event.access);
-      if (normalized) event = { ...event, ...normalized, guests:event.guests||[],guestsLoaded:event.guestsLoaded||false, image: normalized.image || event.image, hostPhoto: normalized.hostPhoto || event.hostPhoto, location:normalized.locationAddress?normalized.location:event.location, locationAddress:normalized.locationAddress||event.locationAddress, goingCount:normalized.goingCount??event.goingCount };
+      if (normalized) event = { ...event, ...normalized, background:normalizeBackground(fields,event.background)||event.background||null, guests:event.guests||[],guestsLoaded:event.guestsLoaded||false, image: normalized.image || event.image, hostPhoto: normalized.hostPhoto || event.hostPhoto, location:normalized.locationAddress?normalized.location:event.location, locationAddress:normalized.locationAddress||event.locationAddress, goingCount:normalized.goingCount??event.goingCount };
     }
     if (guest.status === 'fulfilled') {
       const fields = decodeFields(guest.value.fields);
