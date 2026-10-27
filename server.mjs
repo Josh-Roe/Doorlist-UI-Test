@@ -55,7 +55,7 @@ export function createDoorlistServer({ providerFactory = () => new DoorlistProvi
           if (!/^\+[1-9]\d{7,14}$/.test(phone)) throw new ProviderError('Enter your phone number with its country code.', 400);
           const key = createHash('sha256').update(phone).digest('hex');
           const limit = codeLimits.get(key);
-          if (limit && (clock() - limit.last < 60000 || (limit.count >= 5 && clock() - limit.start < 15 * 60000))) throw new ProviderError('Wait before requesting another code.', 429);
+          if (limit && (clock() - limit.last < 10000 || (limit.count >= 5 && clock() - limit.start < 15 * 60000))) throw new ProviderError('Wait before requesting another code.', 429);
           const next = !limit || clock() - limit.start > 15 * 60000 ? { start: clock(), last: clock(), count: 1 } : { ...limit, last: clock(), count: limit.count + 1 };
           codeLimits.set(key, next);
           let session = getSession(req);

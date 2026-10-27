@@ -94,7 +94,7 @@ export async function handleDoorlist(request:Request,env:Runtime) {
       let phone=String(body.phone||'').replace(/[\s()-]/g,'');
       if(/^\d{10}$/.test(phone))phone=`+1${phone}`;
       if(!/^\+[1-9]\d{7,14}$/.test(phone))throw new ProviderError('Enter your phone number with its country code.',400);
-      await limit(env.DB,env,`phone:${phone}`,5,60000);
+      await limit(env.DB,env,`phone:${phone}`,5,10000);
       await limit(env.DB,env,`ip:${request.headers.get('CF-Connecting-IP')||'unknown'}`,20,1000);
       if(!session){const raw=crypto.randomUUID();session={raw,id:await digest(raw),provider:new DoorlistProvider()};}
       await session.provider.sendCode(phone);

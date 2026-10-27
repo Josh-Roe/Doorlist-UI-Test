@@ -44,3 +44,18 @@ test('server protects sessions, credentials, origin boundaries and private sourc
   assert.equal(disconnected.status, 200);
   assert.equal((await send('/api/events', { headers: sessionHeaders })).status, 401);
 });
+
+test('sign-in codes can be resent after ten seconds while the five-code cap remains', async t => {
+  let now=Date.parse('2026-10-26T12:00:00Z'),sent=0;
+  const server=createDoorlistServer({port:0,clock:()=>now,providerFactory:()=>({...fixture(),async sendCode(){sent++;}})});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  t.after(()=>new Promise(resolve=>server.close(resolve)));
+  const base=`http://127.0.0.1:${server.address().port}`;
+  const send=()=>fetch(base+'/api/auth/code',{method:'POST',headers:{Origin:base,'Content-Type':'application/json','X-Doorlist-Client':'mobile-ui'},body:JSON.stringify({phone:'+15555550123'})});
+  const status=async()=>{const response=await send();await response.json();return response.status;};
+  assert.equal(await status(),200);
+  now+=9999;assert.equal(await status(),429);assert.equal(sent,1);
+  now++;assert.equal(await status(),200);assert.equal(sent,2);
+  for(let i=0;i<3;i++){now+=10000;assert.equal(await status(),200);}
+  now+=10000;assert.equal(await status(),429);assert.equal(sent,5);
+});
