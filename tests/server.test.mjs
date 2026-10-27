@@ -59,3 +59,14 @@ test('sign-in codes can be resent after ten seconds while the five-code cap rema
   for(let i=0;i<3;i++){now+=10000;assert.equal(await status(),200);}
   now+=10000;assert.equal(await status(),429);assert.equal(sent,5);
 });
+
+test('common US phone formats and an explicit international number normalize before sending',async t=>{
+ let now=Date.parse('2026-10-26T12:00:00Z');const phones=[];
+ const server=createDoorlistServer({port:0,clock:()=>now,providerFactory:()=>({...fixture(),async sendCode(phone){phones.push(phone);}})});
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>server.close(resolve)));
+ const base=`http://127.0.0.1:${server.address().port}`;
+ for(const phone of ['4155550123','+1 (415) 555-0123','1 415 555 0123','+44 20 7946 0123']){
+  const r=await fetch(base+'/api/auth/code',{method:'POST',headers:{Origin:base,'Content-Type':'application/json','X-Doorlist-Client':'mobile-ui'},body:JSON.stringify({phone})});await r.json();assert.equal(r.status,200);now+=10000;
+ }
+ assert.deepEqual(phones,['+14155550123','+14155550123','+14155550123','+442079460123']);
+});

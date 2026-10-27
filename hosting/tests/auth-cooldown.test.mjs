@@ -28,3 +28,15 @@ test('hosted SMS resend opens at ten seconds and retains the five-code cap',asyn
   for(let i=0;i<3;i++){now+=10000;assert.equal((await send()).status,200);}
   now+=10000;response=await send();assert.equal(response.status,429);assert.equal(sent,5);
 });
+
+test('hosted auth accepts a US country code without plus and keeps diagnostics free of private details',async t=>{
+ const DB={prepare(){return {bind(){return {first:async()=>({attempts:1}),run:async()=>({success:true})};}};}};
+ const env={DB,SESSION_ENCRYPTION_KEY:'test-only-auth-error-key-not-used-in-production-0123456789'};
+ let normalized;
+ t.mock.method(globalThis,'fetch',async (_url,options)=>{normalized=JSON.parse(options.body).phone;return Response.json({code:'signup_disabled',msg:'private phone +14155550123 code 123456'},{status:422});});
+ const logs=[];t.mock.method(console,'warn',(...args)=>logs.push(args));
+ const response=await handleDoorlist(new Request('https://test.example/api/auth/code',{method:'POST',headers:{Origin:'https://test.example','Content-Type':'application/json','X-Doorlist-Client':'mobile-ui'},body:JSON.stringify({phone:'1 (415) 555-0123'})}),env);
+ assert.equal(normalized,'+14155550123');assert.equal(response.status,422);
+ const data=await response.json();assert.match(data.error,/existing Doorlist account/);assert.ok(!JSON.stringify(data).includes('123456'));
+ assert.deepEqual(logs,[['doorlist_auth_failure',{stage:'send_code',status:422,reason:'signup_disabled'}]]);
+});

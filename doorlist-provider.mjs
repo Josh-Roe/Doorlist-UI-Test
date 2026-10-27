@@ -4,7 +4,30 @@ import QRCode from 'qrcode';
 
 const publishedConfig = JSON.parse(await readFile(new URL('./doorlist-provider-config.json', import.meta.url)));
 export class ProviderError extends Error {
-  constructor(message, status = 502) { super(message); this.status = status; }
+  constructor(message, status = 502, code = '') { super(message); this.status = status; this.code = code; }
+}
+// Only documented error identifiers are retained; upstream messages can contain private details.
+const authFailureCodes=new Set(['signup_disabled','user_not_found','validation_failed','sms_send_failed','phone_provider_disabled','otp_disabled','otp_expired','invalid_credentials','over_sms_send_rate_limit','over_request_rate_limit','unexpected_failure','request_timeout','user_banned','session_expired','phone_not_confirmed','captcha_failed','hook_timeout','hook_timeout_after_retry']);
+function authFailure(url,base,data,status) {
+  if(!url.startsWith(`${base}/auth/v1/`))return null;
+  const path=new URL(url).pathname;
+  if(!['/auth/v1/otp','/auth/v1/verify'].includes(path))return null;
+  const incoming=data?.error_code||data?.code;
+  const code=authFailureCodes.has(incoming)?incoming:'upstream_auth_error';
+  const sending=path.endsWith('/otp');
+  let message=sending
+    ? 'Doorlist could not send a code for this number. Check the country code and use the phone number on your existing Doorlist account.'
+    : 'Doorlist could not complete sign-in. Try again.';
+  if(['signup_disabled','user_not_found'].includes(code))message='Use the phone number attached to your existing Doorlist account. This website cannot create a new Doorlist account.';
+  else if(['otp_expired','invalid_credentials'].includes(code))message='That code is incorrect or has expired. Enter the latest SMS code, or request a new one.';
+  else if(['over_sms_send_rate_limit','over_request_rate_limit'].includes(code)||status===429)message='Doorlist is limiting SMS requests. Wait before requesting another code.';
+  else if(code==='sms_send_failed')message='Doorlist could not deliver the SMS. Check your phone number and try again later.';
+  else if(['phone_provider_disabled','otp_disabled'].includes(code))message='Doorlist SMS sign-in is unavailable right now. Try again later.';
+  else if(code==='validation_failed')message=sending?'Doorlist did not accept that phone number. Check the digits and country code.':'Doorlist did not accept that code. Enter the latest code from your SMS.';
+  else if(code==='user_banned')message='Doorlist could not sign in to this account. Contact Doorlist support.';
+  else if(code==='captcha_failed')message='Doorlist could not complete its security check. Try signing in through the official Doorlist app.';
+  else if(status>=500||['request_timeout','hook_timeout','hook_timeout_after_retry'].includes(code))message='Doorlist sign-in is temporarily unavailable. Try again later.';
+  return new ProviderError(message,status,code);
 }
 export function decodeField(value = {}) {
   if ('stringValue' in value) return value.stringValue;
@@ -165,6 +188,8 @@ export class DoorlistProvider {
     try { data = await response.json(); } catch { /* Some successful responses have no JSON body. */ }
     if (!response.ok) {
       const status = response.status;
+      const auth=authFailure(url,this.config.supabaseUrl,data,status);
+      if(auth)throw auth;
       const message = status === 401 ? 'Your Doorlist session expired. Please sign in again.'
         : status === 403 ? 'Doorlist has not granted access to this information.'
         : status === 429 ? 'Too many requests. Please wait before trying again.'
@@ -182,7 +207,7 @@ export class DoorlistProvider {
   }
   async sendCode(phone) {
     await this.request(`${this.config.supabaseUrl}/auth/v1/otp`, {
-      method: 'POST', headers: this.authHeaders(), body: JSON.stringify({ phone, create_user: false, channel: 'sms' }),
+      method: 'POST', headers: this.authHeaders(), body: JSON.stringify({ phone, create_user: true, channel: 'sms' }),
     });
   }
   async verifyCode(phone, code) {
@@ -193,8 +218,14 @@ export class DoorlistProvider {
     // A new SMS sign-in starts a fresh account-scoped cache and Firebase identity.
     this.clear();
     this.setSession(session);
-    const user = await this.api(`/api/users/phone/${obfuscatePhone(phone)}`);
-    if (!user.uuid || !user.name) { this.clear(); throw new ProviderError('An existing Doorlist account is required.', 404); }
+    let user;
+    try { user = await this.api(`/api/users/phone/${obfuscatePhone(phone)}`); }
+    catch(error) {
+      this.clear();
+      if(error.status===404)throw new ProviderError('An existing Doorlist account is required. Create your account in the official Doorlist app first.',404,'doorlist_account_required');
+      throw error;
+    }
+    if (!user.uuid || !user.name) { this.clear(); throw new ProviderError('An existing Doorlist account is required. Create your account in the official Doorlist app first.',404,'doorlist_account_required'); }
     this.profile = { id: user.uuid, name: String(user.name), photo: safeImage(user.profilePicture) || 'profile.png',school:String(user.school||'') };
     this.rememberProfiles([this.profile]);
     return this.profile;

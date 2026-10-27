@@ -52,6 +52,7 @@ export function createDoorlistServer({ providerFactory = () => new DoorlistProvi
         if (req.method === 'POST' && url.pathname === '/api/auth/code') {
           const data = await body(req); let phone = String(data.phone || '').replace(/[\s()-]/g, '');
           if (/^\d{10}$/.test(phone)) phone = `+1${phone}`;
+          else if (/^1\d{10}$/.test(phone)) phone = `+${phone}`;
           if (!/^\+[1-9]\d{7,14}$/.test(phone)) throw new ProviderError('Enter your phone number with its country code.', 400);
           const key = createHash('sha256').update(phone).digest('hex');
           const limit = codeLimits.get(key);
@@ -97,6 +98,8 @@ export function createDoorlistServer({ providerFactory = () => new DoorlistProvi
       res.writeHead(200, { 'Content-Type': mime[name.split('.').at(-1)] || 'application/octet-stream', 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' });
       res.end(req.method === 'HEAD' ? undefined : data);
     } catch (error) {
+      const authPath=(req.url||'').split('?')[0];
+      if(error instanceof ProviderError&&error.code&&/^\/api\/auth\/(code|verify)$/.test(authPath))console.warn('doorlist_auth_failure',{stage:authPath.endsWith('/code')?'send_code':'verify_code',status:error.status,reason:error.code});
       json(res, error instanceof ProviderError ? error.status : 500, { error: error instanceof ProviderError ? error.message : 'The app could not complete this request.' });
     }
   });

@@ -93,6 +93,7 @@ export async function handleDoorlist(request:Request,env:Runtime) {
       const body=await readBody(request);
       let phone=String(body.phone||'').replace(/[\s()-]/g,'');
       if(/^\d{10}$/.test(phone))phone=`+1${phone}`;
+      else if(/^1\d{10}$/.test(phone))phone=`+${phone}`;
       if(!/^\+[1-9]\d{7,14}$/.test(phone))throw new ProviderError('Enter your phone number with its country code.',400);
       await limit(env.DB,env,`phone:${phone}`,5,10000);
       await limit(env.DB,env,`ip:${request.headers.get('CF-Connecting-IP')||'unknown'}`,20,1000);
@@ -133,6 +134,7 @@ export async function handleDoorlist(request:Request,env:Runtime) {
     }
     return reply({error:'Not found.'},404);
   } catch(error:any) {
+    if(error instanceof ProviderError&&error.code&&/^\/api\/auth\/(code|verify)$/.test(url.pathname))console.warn('doorlist_auth_failure',{stage:url.pathname.endsWith('/code')?'send_code':'verify_code',status:error.status,reason:error.code});
     return reply({error:error instanceof ProviderError?error.message:'The app could not complete this request.'},error instanceof ProviderError?error.status:500);
   }
 }
