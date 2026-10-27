@@ -434,3 +434,9 @@ html[data-page-moving] .event-background-image { visibility:hidden; }
 .page-stage>.page-frame { position:absolute; inset:0; width:100%; height:100%; margin:0; }
 /* Freeze expensive live glass sampling while whole screens move. */
 html[data-page-moving] .page-frame :is(.glass-button,.glass-panel,.dock-tabs,.event-dock-button) { backdrop-filter:none; -webkit-backdrop-filter:none; }
+
+.background-is-light .screen-topbar .glass-button { color:#362002; background:#ffffff85; border-color:#0002; }
+.background-is-light .guest-summary { color:#362002; background:#ffffff85; border-color:#0002; }
+.background-is-light .guest-summary small { color:#594a3b; }
+.background-is-light .shared-playlist { color:#362002; }
+.background-is-light .playlist-actions :is(a,button) { color:#362002; background:#ffffff85; border-color:#0002; }
