@@ -446,3 +446,18 @@ html[data-page-moving] .page-frame :is(.glass-button,.glass-panel,.dock-tabs,.ev
  html,body { height:var(--app-visible-height,100dvh); min-height:var(--app-visible-height,100dvh); overflow:visible; }
  .page-stage { position:absolute; }
 }
+
+/* Use the same typefaces served by Doorlist's event editor and event pages. */
+@font-face { font-family:Bartle; src:url("https://doorlist.app/fonts/bartle/bartle-regular.ttf") format("truetype"); font-display:swap; }
+@font-face { font-family:BricolageGrotesque; src:url("https://doorlist.app/fonts/bricolageGrotesque/BricolageGrotesque-VariableFont_opsz,wdth,wght.ttf") format("truetype"); font-weight:100 900; font-display:swap; }
+@font-face { font-family:Glitch; src:url("https://doorlist.app/fonts/glitch/glitch-regular.ttf") format("truetype"); font-display:swap; }
+@font-face { font-family:Graffiti; src:url("https://doorlist.app/fonts/sedgwick/SedgwickAveDisplay-Regular.ttf") format("truetype"); font-display:swap; }
+@font-face { font-family:Pixelify; src:url("https://doorlist.app/fonts/pixelify/pixelify-variable.ttf") format("truetype"); font-weight:400 700; font-display:swap; }
+@font-face { font-family:Varela; src:url("https://doorlist.app/fonts/varela/varela-regular.ttf") format("truetype"); font-display:swap; }
+.event-title { font-family:BricolageGrotesque,-apple-system,BlinkMacSystemFont,sans-serif; font-weight:700; }
+.event-title[data-title-font="Bartle"] { font-family:Bartle,sans-serif; }
+.event-title[data-title-font="Glitch"] { font-family:Glitch,sans-serif; }
+.event-title[data-title-font="Graffiti"] { font-family:Graffiti,cursive; }
+.event-title[data-title-font="Pixelify"] { font-family:Pixelify,monospace; }
+.event-title[data-title-font="Varela"] { font-family:Varela,sans-serif; }
+.event-title[data-title-font="Serif"] { font-family:serif; }

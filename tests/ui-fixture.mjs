@@ -5,7 +5,7 @@ import QRCode from 'qrcode';
 const now = Date.now();
 const profiles=Array.from({length:24},(_,i)=>({id:`cached-${i}`,name:`Cached Profile Fixture ${i}`,photo:'https://doorlist-mobile-josh-roe.fairrose12.chatgpt.site/mobile/profile.png'}));
 const events = ['invited-fixture','discover-fixture','official-fixture'].map((id, index) => ({
-  id, title: ['Invited Test Event','Discover Test Event','Official Test Event'][index], host: 'Test Host', image:'', hostPhoto:'https://invalid.example/host.jpg',hostId:'fixture-host',guestPreview:[{id:'preview-one',name:'Test Guest',photo:'https://invalid.example/person.jpg'}], theme:'purple',
+  id, title: ['Invited Test Event','Discover Test Event','Official Test Event'][index], host: 'Test Host', image:'', hostPhoto:'https://invalid.example/host.jpg',hostId:'fixture-host',guestPreview:[{id:'preview-one',name:'Test Guest',photo:'https://invalid.example/person.jpg'}], theme:'purple',fontFamily:['Serif','BricolageGrotesque','Glitch'][index],
   startsAt:new Date(now+3600000).toISOString(), endsAt:new Date(now+7200000).toISOString(), location:'2647 Durant Avenue',locationAddress:'2647 Durant Avenue, Berkeley, CA',playlist:{url:'https://open.spotify.com/playlist/fixture',songCount:2}, description:'Integration fixture',
   access:index===1?'discover':'invited', source:'doorlist', sourceUrl:`https://doorlist.app/e/${id}`, rsvp:'invited',canRsvp:index!==1,
   guests:[],guestsLoaded:false,detailsLoaded:false,

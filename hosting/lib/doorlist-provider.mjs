@@ -98,6 +98,10 @@ export function normalizeLocation(value, fallback = '') {
   }
   return {location:fallback || 'Location not shared',locationAddress:fallback || ''};
 }
+const eventFontFamilies=new Set(['Bartle','BricolageGrotesque','Glitch','Graffiti','Pixelify','Varela','Serif']);
+export function normalizeEventFont(value) {
+  return typeof value==='string' && eventFontFamilies.has(value.trim()) ? value.trim() : null;
+}
 export function normalizeEvent(event, access = 'discover') {
   const id = String(event.eventId || event.id || '');
   if (!/^[\w-]{5,100}$/.test(id) || !event.name) return null;
@@ -108,7 +112,7 @@ export function normalizeEvent(event, access = 'discover') {
     hostId: String(event.orgFBid || event.orgID || event.hostID || ''),
     hostPhoto: safeImage(event.orgCoverPhoto || event.hostPhoto || event.hostProfilePicture),
     image: safeImage(event.eventCoverCroppedURL || event.eventCoverURL || event.coverPhotoURL),
-    theme: 'purple', background: normalizeBackground(event), startsAt: start, endsAt: end,
+    theme: 'purple', background: normalizeBackground(event), fontFamily:normalizeEventFont(event.fontFamily), startsAt: start, endsAt: end,
     ...normalizeLocation(event.locationReadable && Object.values(event.locationReadable).some(Boolean) ? event.locationReadable : event.location, String(event.locationName || event.address || '')),
     goingCount:event.goingCount!=null&&Number.isInteger(Number(event.goingCount))&&Number(event.goingCount)>=0?Number(event.goingCount):null,
     description: String(event.description || ''), rsvp: 'invited', canRsvp: access === 'invited',
@@ -259,6 +263,7 @@ export class DoorlistProvider {
         const cached=this.allowedEvents.get(event.id);
         merged.set(event.id, { ...cached, ...previous, ...event, goingCount:event.goingCount??previous?.goingCount??cached?.goingCount??null,
           background:normalizeBackground(raw,previous?.background||cached?.background)||previous?.background||cached?.background||null,
+          fontFamily:normalizeEventFont(raw.fontFamily)||previous?.fontFamily||cached?.fontFamily||null,
           guests:cached?.guests||[],guestsLoaded:cached?.guestsLoaded||false,guestListSource:cached?.guestListSource,
           access, canRsvp: access === 'invited' });
       }
@@ -346,12 +351,13 @@ export class DoorlistProvider {
       const [photo, circles, location] = await Promise.allSettled([
         hosts.get(event.hostId) || Promise.resolve(event.hostPhoto),
         this.api(`/api/event/${encodeURIComponent(event.id)}/circles`),
-        event.locationAddress && event.goingCount!=null && event.background ? Promise.resolve(null) : this.firestore(`eventObjects/${encodeURIComponent(event.id)}`),
+        event.locationAddress && event.goingCount!=null && event.background && event.fontFamily ? Promise.resolve(null) : this.firestore(`eventObjects/${encodeURIComponent(event.id)}`),
       ]);
       if (photo.status === 'fulfilled' && photo.value) event.hostPhoto = photo.value;
       if(location.status==='fulfilled'&&location.value?.fields) {
         const fields=decodeFields(location.value.fields);
         event.background=normalizeBackground(fields,event.background)||event.background||null;
+        event.fontFamily=normalizeEventFont(fields.fontFamily)||event.fontFamily||null;
         if(fields.goingCount!=null&&Number.isInteger(Number(fields.goingCount))&&Number(fields.goingCount)>=0)event.goingCount=Number(fields.goingCount);
         if(!fields.hideDetailsIfNotOnList || event.access==='invited') {
           const location=normalizeLocation(fields.locationReadable || fields.location,String(fields.locationName || fields.address || ''));
@@ -377,7 +383,7 @@ export class DoorlistProvider {
     if (details.status === 'fulfilled') {
       const fields = decodeFields(details.value.fields);
       const normalized = normalizeEvent({ ...fields, eventId: id }, event.access);
-      if (normalized) event = { ...event, ...normalized, background:normalizeBackground(fields,event.background)||event.background||null, guests:event.guests||[],guestsLoaded:event.guestsLoaded||false, image: normalized.image || event.image, hostPhoto: normalized.hostPhoto || event.hostPhoto, location:normalized.locationAddress?normalized.location:event.location, locationAddress:normalized.locationAddress||event.locationAddress, goingCount:normalized.goingCount??event.goingCount };
+      if (normalized) event = { ...event, ...normalized, background:normalizeBackground(fields,event.background)||event.background||null, fontFamily:normalizeEventFont(fields.fontFamily)||event.fontFamily||null, guests:event.guests||[],guestsLoaded:event.guestsLoaded||false, image: normalized.image || event.image, hostPhoto: normalized.hostPhoto || event.hostPhoto, location:normalized.locationAddress?normalized.location:event.location, locationAddress:normalized.locationAddress||event.locationAddress, goingCount:normalized.goingCount??event.goingCount };
     }
     if (guest.status === 'fulfilled') {
       const fields = decodeFields(guest.value.fields);

@@ -133,8 +133,19 @@ function gatheringSection() {
 function hostTile(events) {
   return `<button class="host-card" data-action="create"><svg class="host-card-outline" viewBox="0 0 236 236" preserveAspectRatio="none" aria-hidden="true"><rect x="1" y="1" width="234" height="234" rx="23" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="10 10" vector-effect="non-scaling-stroke"/></svg><img class="native-host-art" src="assets/doorlist-host-stack.png" alt="" aria-hidden="true"><strong>Create your own event</strong><span>Host and invite your friends!</span></button>`;
 }
+const warmedTitleFonts=new Set();
+function warmEventTitleFonts(events) {
+  if(!document.fonts?.load)return;
+  for(const family of new Set(events.map(event=>event.fontFamily||'BricolageGrotesque'))) {
+    if(!['Bartle','BricolageGrotesque','Glitch','Graffiti','Pixelify','Varela'].includes(family)||warmedTitleFonts.has(family))continue;
+    warmedTitleFonts.add(family);
+    const load=()=>document.fonts.load(`700 38px "${family}"`).catch(()=>warmedTitleFonts.delete(family));
+    if(window.requestIdleCallback)requestIdleCallback(load,{timeout:1500});else setTimeout(load,0);
+  }
+}
 function home() {
   const events=eventStore.listEvents();
+  warmEventTitleFonts(events);
   const featured=events.find(event=>event.rsvp==='going') || events.find(event=>event.access==='invited') || events[0];
   const slides=featured?[featured,...events.filter(event=>event.id!==featured.id)]:[];
   return `<div class="home-view"><header class="home-header"><h1 class="wordmark">doorlist</h1><div class="header-actions"><a href="#/search" class="glass-button" aria-label="Search events">${icon('search')}</a></div></header>
@@ -183,7 +194,7 @@ function eventPage(event) {
   const date = dateParts(event);
   const going = event.goingCount ?? (event.guests.filter(guest=>guest.status==='going').length + (event.source !== 'doorlist' && event.rsvp==='going' ? 1 : 0));
   return `<div class="event-view theme-${esc(event.theme)}${event.background?.isDark===false?' background-is-light':''}">${confettiBackground(event)}${topbar('/', '', `<button class="glass-button" data-action="event-menu" data-id="${event.id}" aria-label="Event options">${icon('more')}</button>`)}
-    <h1 class="event-title">${esc(event.title)}</h1><div class="detail-poster">${poster(event)}</div>
+    <h1 class="event-title" data-title-font="${esc(event.fontFamily||'BricolageGrotesque')}">${esc(event.title)}</h1><div class="detail-poster">${poster(event)}</div>
     <a class="guest-summary glass-panel" href="#/event/${event.id}/guests">${avatarStack(event)}<span><strong>Guest List</strong><small>${going} going</small></span><span class="see-all">See All ${icon('next')}</span></a>
     <section class="event-info"><div class="info-line"><span class="info-icon">${icon('calendar')}</span><div><span>Date</span><strong>${date.full}</strong><p>${date.time} – ${date.endTime}</p></div></div><div class="info-line">${hostAvatar(event)}<div><span>Hosted by</span><strong>${esc(event.host)}</strong></div></div><div class="info-line"><span class="info-icon">${icon('pin')}</span><div><span>Location</span><strong>${esc(event.location)}</strong>${event.locationAddress?`<a class="location-link" href="https://maps.apple.com/?q=${encodeURIComponent(event.locationAddress)}" target="_blank" rel="noopener noreferrer">${esc(event.locationAddress)}</a>`:''}</div></div></section>
     <section class="about-event"><h2>About this event</h2><p>${esc(event.description)}</p></section>
