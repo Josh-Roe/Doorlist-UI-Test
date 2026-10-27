@@ -440,3 +440,9 @@ html[data-page-moving] .page-frame :is(.glass-button,.glass-panel,.dock-tabs,.ev
 .background-is-light .guest-summary small { color:#594a3b; }
 .background-is-light .shared-playlist { color:#362002; }
 .background-is-light .playlist-actions :is(a,button) { color:#362002; background:#ffffff85; border-color:#0002; }
+
+/* Avoid WebKit's shortened fixed-root containing block in installed web apps. */
+@media (display-mode:standalone) {
+ html,body { height:var(--app-visible-height,100dvh); min-height:var(--app-visible-height,100dvh); overflow:visible; }
+ .page-stage { position:absolute; }
+}

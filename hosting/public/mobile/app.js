@@ -1,4 +1,4 @@
-import { createPageNavigation } from './page-navigation.js';
+import { createPageNavigation } from './page-navigation.js?v=standalone-2';
 import { eventStore } from './event-store.js';
 import { avatarFallback, profileImage } from './avatar.js';
 import { orderedGuests, guestDisplayStatus } from './guest-list.js';

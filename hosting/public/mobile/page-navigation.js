@@ -105,7 +105,10 @@ export function createPageNavigation({app,invite,onActivate=()=>{},onActivity=()
     },
     prepareBack(route){if(busy())return;preview=pages.get(route)||null;syncVisibility();},
     restore(route){
-      if(current.route!==route){if(current.route)pages.delete(current.route);current.route=route;pages.set(route,current);}
+      if(current.route!==route){
+        if(current.rendered)activate(pages.get(route)||sceneFor(route));
+        else{if(current.route)pages.delete(current.route);current.route=route;pages.set(route,current);}
+      }
       return current.rendered?{meta:current.meta,scrollTop:current.scrollTop}:null;
     },
     didRender(route){if(isQR())return;current.route=route;current.rendered=true;current.meta=getMeta();current.scrollTop=current.content.scrollTop;pages.set(route,current);extractChrome(current);},
