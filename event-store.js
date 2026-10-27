@@ -1,3 +1,4 @@
+import { deduplicateEvents } from './event-identity.js';
 import { eventStore as demoStore } from './demo-store.js';
 const CACHE_KEY='doorlist-account-view-v1';
 const CACHE_TTL=12*60*60*1000;
@@ -50,7 +51,7 @@ export function createEventStore({fetchImpl=(...args)=>fetch(...args),storage=br
   const store={
     get mode(){return mode;},get authenticated(){return authenticated;},get status(){return status;},get error(){return error;},get coverage(){return coverage;},get syncedAt(){return syncedAt;},get refreshing(){return Boolean(refreshing);},
     subscribe(fn){listeners.add(fn);return()=>listeners.delete(fn);},
-    listEvents:()=>mode==='preview'?demoStore.listEvents():structuredClone(events),
+    listEvents:()=>structuredClone(deduplicateEvents(mode==='preview'?demoStore.listEvents():events)),
     getEvent:id=>mode==='preview'?demoStore.getEvent(id):structuredClone(events.find(event=>event.id===id)||null),
     getSuggestedFriends:()=>mode==='preview'?demoStore.getGuests('house-night').slice(0,6):structuredClone(suggestedFriends),
     getProfiles:()=>structuredClone(profiles),

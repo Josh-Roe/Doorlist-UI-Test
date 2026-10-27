@@ -7,7 +7,7 @@ const app = document.getElementById('appView');
 const invite = document.getElementById('inviteView');
 const dialog = document.getElementById('actionDialog');
 const toast = document.getElementById('toast');
-const pageNavigation=createPageNavigation({app,invite,onActivity:updateConfettiPlayback,onSettled:()=>{if(pendingDataRender)renderDataUpdate();}});
+const pageNavigation=createPageNavigation({app,invite,onActivity:updateConfettiPlayback,onSettled:()=>{if(pendingDataRender)renderDataUpdate();scheduleBackPage();},getMeta:()=>({revision:screenRevision,guestFilter,guestQuery,guestVisibleCount,guestBatchError}),getBackTarget:backTarget,onBack:goBack});
 const icons = {
   back: '<path d="m14 5-7 7 7 7"/>',
   next: '<path d="m9 5 7 7-7 7"/>',
@@ -35,6 +35,11 @@ const esc = text => String(text ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;'
 const initials = name => name.split(/\s+/).map(part => part[0]).slice(0, 2).join('');
 const statusLabel = status => ({going:'Going',maybe:'Maybe','not-going':'Not going',invited:'Invited',unconfirmed:'Not confirmed'}[status]);
 let currentRoute = '';
+let screenRevision=0,cacheAccountId=eventStore.getProfile().id||null;
+let historyIndex=0;
+const historyRoutes=new Map([[0,location.hash.slice(1)||'/']]);
+history.replaceState({...history.state,doorlistRoute:{index:0,route:location.hash.slice(1)||'/'}},'');
+let warmBackTask=0;
 let guestFilter = 'all';
 let guestQuery = '';
 const GUEST_BATCH_SIZE=60;
@@ -252,13 +257,43 @@ function transitionKind(from,to) {
   if (!from.startsWith('/event/') && !to.startsWith('/event/')) {const order=['/','/events','/search','/activity','/profile'];return order.indexOf(to)<order.indexOf(from)?'back':'forward';}
   return to.split('/').filter(Boolean).length < from.split('/').filter(Boolean).length ? 'back' : 'forward';
 }
+function backTarget() {
+  if(!currentRoute||currentRoute==='/'||currentRoute.endsWith('/invite'))return null;
+  const parts=currentRoute.split('/').filter(Boolean);
+  return parts[0]==='event'&&parts.length>2?`/event/${parts[1]}`:'/';
+}
+function goBack(target=backTarget()) {
+  if(!target)return;
+  if(historyIndex>0&&historyRoutes.get(historyIndex-1)===target)history.back();
+  else location.hash=target;
+}
+function scheduleBackPage() {
+  if(warmBackTask)return;
+  warmBackTask=setTimeout(()=>{
+    warmBackTask=0;if(pageNavigation.moving||eventStore.status==='loading')return;
+    const target=backTarget();if(!target||pageNavigation.has(target))return;
+    const event=target.startsWith('/event/')?eventStore.getEvent(target.split('/')[2]):null;
+    if(target!=='/'&&!event)return;
+    pageNavigation.prime(target,target==='/'?home():eventPage(event),{revision:screenRevision,guestFilter:'all',guestQuery:'',guestVisibleCount:GUEST_BATCH_SIZE,guestBatchError:''});
+    pageNavigation.syncVisibility();
+  },120);
+}
+document.addEventListener('click',event=>{
+  const back=event.target.closest('a[aria-label="Back"]');
+  if(!back||event.defaultPrevented)return;
+  event.preventDefault();goBack(back.hash.slice(1));
+});
+window.addEventListener('invite:close',()=>goBack(`/event/${location.hash.split('/')[2]}`));
 function navigate() {
   const target=location.hash.slice(1)||'/';
   if(target===currentRoute)return;
   savedScroll.set(currentRoute,pageNavigation.scroller.scrollTop);
   const kind=transitionKind(currentRoute,target);
   document.documentElement.dataset.navigation=kind;
-  pageNavigation.slide(kind,()=>render());
+  const state=history.state?.doorlistRoute;
+  if(state?.route===target)historyIndex=state.index;
+  else {historyIndex++;historyRoutes.set(historyIndex,target);history.replaceState({...history.state,doorlistRoute:{index:historyIndex,route:target}},'');}
+  pageNavigation.slide(kind,()=>render(),{from:currentRoute,to:target});
 }
 // Keep images, video decoders and focused controls alive during background updates.
 function patchSurface(parent,html) {
@@ -304,19 +339,22 @@ function render({background=false}={}) {
     document.title = `${event.title} — Your invite`;
   } else {
     window.InviteView.hide();
+    const restored=!background?pageNavigation.restore(route):null;
+    if(restored?.meta){({guestFilter,guestQuery,guestVisibleCount,guestBatchError}=restored.meta);if(restored.meta.revision!==screenRevision)pendingDataRender=true;}
     let markup;
-    if (parts[0]==='event' && !event && eventStore.status === 'loading') markup = `${topbar('/')}<div class="not-found">${empty('Loading events','Connecting to your Doorlist account.','calendar')}</div>`;
+    if(restored){}
+    else if (parts[0]==='event' && !event && eventStore.status === 'loading') markup = `${topbar('/')}<div class="not-found">${empty('Loading events','Connecting to your Doorlist account.','calendar')}</div>`;
     else if (parts[0]==='event' && !event) markup = `${topbar('/')}<div class="not-found">${empty('Event unavailable','This event could not be found.','calendar')}<a class="primary-button" href="#/">Back to home</a></div>`;
     else if (event) markup = parts[2]==='guests' ? guestListPage(event) : eventPage(event);
     else if (parts[0]==='events' || parts[0]==='search') markup = eventListPage(parts[0]==='search');
     else if (parts[0]==='activity') markup = `<div class="activity-view">${topbar('/','Activity')}${empty('All caught up','Your invites, event updates, and +1 requests will show up here.','bell')}${nav('bell')}</div>`;
     else if (parts[0]==='profile') markup = profilePage();
     else markup = home();
-    if(background)patchSurface(app,markup);else app.innerHTML=markup;
+    if(!restored){if(background)patchSurface(app,markup);else app.innerHTML=markup;}
     document.title = event ? `${event.title} — Doorlist` : 'Doorlist';
   }
   if (currentRoute !== route) {
-    pageNavigation.scroller.scrollTo(0,['back','dismiss'].includes(document.documentElement.dataset.navigation) ? savedScroll.get(route)||0 : 0);
+    if(!pageNavigation.scroller.scrollTop)pageNavigation.scroller.scrollTo(0,['back','dismiss'].includes(document.documentElement.dataset.navigation) ? savedScroll.get(route)||0 : 0);
     if (!qr && app.querySelector('h1')) { app.querySelector('h1').tabIndex=-1; app.querySelector('h1').focus({preventScroll:true}); }
   }
   currentRoute = route;
@@ -325,6 +363,7 @@ function render({background=false}={}) {
   if(parts[2]==='guests')queueMicrotask(bindGuestScroll);
   if(!qr&&parts.length===0&&activeHeroId){const rail=document.querySelector('.coming-up-rail');const card=rail?.querySelector(`a[href="#/event/${activeHeroId}"]`);if(card)rail.scrollLeft=card.offsetLeft-rail.offsetLeft;}
   if (event?.source === 'doorlist' && !qr) hydrateEventRoute(event, parts[2] === 'guests');
+  pageNavigation.syncVisibility();scheduleBackPage();
 }
 function dismissDialog() {
   if(!dialog.open)return;
@@ -407,7 +446,7 @@ window.addEventListener('invite:settings', event=>{
 });
 window.addEventListener('hashchange',navigate);
 render();
-eventStore.subscribe(renderDataUpdate);
+eventStore.subscribe(()=>{const id=eventStore.getProfile().id||null;if(id!==cacheAccountId){pageNavigation.clear();cacheAccountId=id;}screenRevision++;renderDataUpdate();});
 eventStore.initialize();
 let lastAutoRefresh=Date.now();
 function backgroundRefresh(){if(eventStore.authenticated&&!document.hidden&&Date.now()-lastAutoRefresh>60000){lastAutoRefresh=Date.now();eventStore.refresh().catch(()=>{});}}
@@ -461,8 +500,8 @@ async function refreshEvents() {
 }
 async function hydrateEventRoute(event, guests) {
   const key = `${event.id}:${guests ? 'guests' : 'details'}`;
-  if(document.documentElement.dataset.pageMoving){pendingDataRender=true;return;}
   if (!eventStore.authenticated || hydrating.has(key) || (guests ? event.guestsLoaded&&!event.guestListStale : event.detailsLoaded&&!event.detailsStale)) return;
+  if(document.documentElement.dataset.pageMoving){pendingDataRender=true;return;}
   hydrating.add(key);
   try {
     if(eventStore.refreshing)await eventStore.refresh();
@@ -471,6 +510,7 @@ async function hydrateEventRoute(event, guests) {
     else await eventStore.loadEvent(event.id);
     const route = `/event/${event.id}${guests ? '/guests' : ''}`;
     if (location.hash.slice(1) !== route) return;
+    screenRevision++;
     if (guests) {
       const loaded = eventStore.getEvent(event.id);
       patchSurface(document.getElementById('guestResults'),guestRows(loaded));bindGuestScroll();

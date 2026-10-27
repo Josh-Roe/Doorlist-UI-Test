@@ -393,10 +393,19 @@ button:disabled { opacity:.6; cursor:wait; }
 
 /* Each route slides as a clipped viewport, never as a full-length document. */
 html,body { height:100%; overflow:hidden; }
-.page-frame { position:fixed; inset:0; width:100%; max-width:480px; height:100dvh; margin-inline:auto; overflow:hidden; contain:strict; isolation:isolate; background:var(--app-bg); }
+.page-frame { position:fixed; inset:0; width:100%; max-width:480px; height:auto; margin-inline:auto; overflow:hidden; contain:strict; isolation:isolate; background:var(--app-bg); }
 .page-frame .mobile-app { height:100%; min-height:0; overflow-x:hidden; overflow-y:auto; overscroll-behavior-y:contain; -webkit-overflow-scrolling:touch; scrollbar-width:none; }
 .page-frame .mobile-app::-webkit-scrollbar { display:none; }
 .page-frame[data-screen="invite"] { overflow-y:auto; scrollbar-width:none; }
 .page-frame .outgoing-scroll { pointer-events:none; }
 html[data-page-moving] .page-frame { pointer-events:none; }
 html[data-page-moving] .page-frame :is(.confetti-field i,.guest-avatar,.guest-loading-dot) { animation-play-state:paused !important; }
+
+.page-frame[data-can-swipe="true"] #appView { touch-action:pan-y pinch-zoom; }
+.swipe-underlay { pointer-events:none; }
+
+/* Anchor to the iPhone viewport edges and continue the dock backdrop under the home indicator. */
+.bottom-dock { bottom:0; height:calc(57px + max(8px, env(safe-area-inset-bottom,0px))); padding-bottom:max(8px, env(safe-area-inset-bottom,0px)); align-items:flex-start; }
+.bottom-dock .dock-tabs { height:57px; }
+.bottom-dock::before { content:''; position:absolute; z-index:-1; left:-16px; right:-16px; bottom:0; height:calc(105px + env(safe-area-inset-bottom,0px)); background:linear-gradient(transparent,var(--app-bg) 80%); pointer-events:none; }
+.page-frame #inviteView { min-height:100%; }

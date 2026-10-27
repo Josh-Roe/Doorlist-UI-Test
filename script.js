@@ -214,7 +214,7 @@
 
   // Safari browser chrome is controlled by Safari; standalone launch omits it.
   els.closeBtn.addEventListener('click', () => {
-    if (activeEventId) window.location.hash = `/event/${activeEventId}`;
+    if (activeEventId) window.dispatchEvent(new CustomEvent('invite:close'));
     else window.location.hash = '/';
   });
 
