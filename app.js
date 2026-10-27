@@ -139,7 +139,8 @@ function warmEventTitleFonts(events) {
   for(const family of new Set(events.map(event=>event.fontFamily||'BricolageGrotesque'))) {
     if(!['Bartle','BricolageGrotesque','Glitch','Graffiti','Pixelify','Varela'].includes(family)||warmedTitleFonts.has(family))continue;
     warmedTitleFonts.add(family);
-    const load=()=>document.fonts.load(`700 40px "${family}"`).catch(()=>warmedTitleFonts.delete(family));
+    const weight=family==='Glitch'?700:600;
+    const load=()=>document.fonts.load(`${weight} 42px "${family}"`).catch(()=>warmedTitleFonts.delete(family));
     if(window.requestIdleCallback)requestIdleCallback(load,{timeout:1500});else setTimeout(load,0);
   }
 }
