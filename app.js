@@ -1,4 +1,5 @@
-import { createPageNavigation } from './page-navigation.js?v=standalone-2';
+import { createNotificationPreview } from './notification-feed.js';
+import { createPageNavigation } from './page-navigation.js?v=tabs-3';
 import { eventStore } from './event-store.js';
 import { avatarFallback, profileImage } from './avatar.js';
 import { orderedGuests, guestDisplayStatus } from './guest-list.js';
@@ -200,7 +201,7 @@ function eventPage(event) {
     <section class="event-info"><div class="info-line"><span class="info-icon">${icon('calendar')}</span><div><span>Date</span><strong>${date.full}</strong><p>${date.time} – ${date.endTime}</p></div></div><div class="info-line">${hostAvatar(event)}<div><span>Hosted by</span><strong>${esc(event.host)}</strong></div></div><div class="info-line"><span class="info-icon">${icon('pin')}</span><div><span>Location</span><strong>${esc(event.location)}</strong>${event.locationAddress?`<a class="location-link" href="https://maps.apple.com/?q=${encodeURIComponent(event.locationAddress)}" target="_blank" rel="noopener noreferrer">${esc(event.locationAddress)}</a>`:''}</div></div></section>
     <section class="about-event"><h2>About this event</h2><p>${esc(event.description)}</p></section>
     ${sharedPlaylistSection(event)}
-    <nav class="event-dock" aria-label="Event actions"><button data-action="rsvp" data-id="${event.id}"><span class="event-dock-button">🔥</span><span>RSVP</span></button><button class="share-action" data-action="share" data-id="${event.id}"><span class="event-dock-button">${icon('share')}</span><span>Share</span></button><a href="#/event/${event.id}/invite"><span class="event-dock-button">${icon('qr')}</span><span>Tickets</span></a></nav></div>`;
+    <nav class="event-dock" aria-label="Event actions"><button data-action="rsvp" data-id="${event.id}"><span class="event-dock-button">${event.rsvp==='going'?icon('thumb'):event.rsvp==='maybe'?'🤔':event.rsvp==='not-going'?'👎':'🔥'}</span><span>RSVP</span></button><button class="share-action" data-action="share" data-id="${event.id}"><span class="event-dock-button">${icon('share')}</span><span>Share</span></button><a href="#/event/${event.id}/invite"><span class="event-dock-button">${icon('qr')}</span><span>Tickets</span></a></nav></div>`;
 }
 function sharedPlaylistSection(event) {
   return `<section class="shared-playlist"><h2>${icon('spotify')}Shared Playlist</h2><div class="playlist-actions"><button data-action="playlist-add" data-id="${event.id}">${icon('plus')}Add a Song</button>${event.playlist?.url?`<a href="${esc(event.playlist.url)}" target="_blank" rel="noopener noreferrer">${icon('arrowUpRight')}Open Playlist</a>`:`<button disabled>${icon('arrowUpRight')}Open Playlist</button>`}</div></section>`;
@@ -256,6 +257,23 @@ async function loadNextGuestBatch(id) {
 function eventListPage(search = false) {
   return `<div class="event-list-view">${topbar('/',search ? 'Search' : 'Your events')}<h1>${search ? 'Find your next plan' : 'Your events'}</h1><label class="search-field">${icon('search')}<input id="eventSearch" type="search" placeholder="Search Events" aria-label="Search events" autocomplete="off"></label><div id="eventResults" class="all-events">${eventStore.listEvents().map(event=>eventRow(event)).join('')}</div>${nav()}</div>`;
 }
+function notificationPreviewSeed() {
+  const key=`doorlist-notification-preview-${eventStore.getProfile().id||'demo'}`;
+  try{const saved=Number(localStorage.getItem(key));if(saved>0)return saved;const seed=crypto.getRandomValues(new Uint32Array(1))[0]||1;localStorage.setItem(key,String(seed));return seed;}catch{return 23819;}
+}
+function notificationsPage() {
+  const profile=eventStore.getProfile();
+  const people=eventStore.mode==='preview'?eventStore.getSuggestedFriends():eventStore.getProfiles();
+  const rows=createNotificationPreview({profiles:people,events:eventStore.listEvents(),selfId:profile.id,seed:notificationPreviewSeed()});
+  let previousGroup='';
+  return `<div class="activity-view"><header class="notifications-header"><h1>Notifications</h1><span class="notification-preview-label" title="Generated activity using your cached profiles">Preview</span></header>${rows.length?`<div class="notification-feed" aria-label="Generated notification preview">${rows.map(row=>{
+    const group=row.minutesAgo<1440?'Today':'This week';
+    const heading=previousGroup===group?'':`<h2 class="notification-group">${group}</h2>`;previousGroup=group;
+    const time=row.minutesAgo<60?`${row.minutesAgo}m`:row.minutesAgo<1440?`${Math.floor(row.minutesAgo/60)}h`:`${Math.floor(row.minutesAgo/1440)}d`;
+    const message=row.type==='friend-request'?'sent you a friend request.':row.type==='event-invite'?`invited you to <strong>${esc(row.event.title)}</strong>.`:`is going to <strong>${esc(row.event.title)}</strong>.`;
+    return `${heading}<article class="notification-row">${avatar(row.person,'notification-avatar')}<div class="notification-copy">${row.event?`<a href="#/event/${row.event.id}">`:'<div>'}<p><strong>${esc(row.person.name)}</strong> ${message} <time>${time}</time></p>${row.event?'</a>':'</div>'}${row.type==='friend-request'?`<div class="notification-request-actions"><button data-action="preview-accept-request">Accept</button><button data-action="preview-dismiss-request" aria-label="Dismiss preview request from ${esc(row.person.name)}">${icon('close')}</button></div>`:''}</div>${row.type!=='friend-request'&&row.event?.image?`<a class="notification-event-art" href="#/event/${row.event.id}" aria-label="Open ${esc(row.event.title)}"><img loading="lazy" src="${esc(row.event.image)}" alt=""></a>`:''}</article>`;
+  }).join('')}</div>`:empty('All caught up','Activity will appear here once your profiles are loaded.','bell')}${nav('bell')}</div>`;
+}
 function profilePage() {
   const profile = eventStore.getProfile();
   return `<div class="profile-view">${topbar('/','Your profile')}<img class="profile-main-photo" src="${esc(profile.photo)}" alt="Your profile photo"><h1>${esc(profile.name)}</h1><p class="muted">Your social calendar, all in one place.</p><div class="profile-stats"><div><strong>${eventStore.listEvents().length}</strong><span>Events</span></div><div><strong>${eventStore.listEvents().filter(event=>event.rsvp==='going').length}</strong><span>Going</span></div></div><a class="settings-link" href="#/events">${icon('calendar')}Your events${icon('next')}</a><button class="settings-link" data-action="settings">${icon('user')}Edit profile & invite${icon('next')}</button><button class="settings-link" data-action="connect">${icon('people')}${eventStore.authenticated ? 'Doorlist connection' : 'Connect Doorlist'}${icon('next')}</button>${nav('user')}</div>`;
@@ -268,14 +286,16 @@ function renderDataUpdate(){
 }
 dialog.addEventListener('close',()=>{if(pendingDataRender)renderDataUpdate();});
 
+const mainTabs=new Set(['/','/activity','/profile']);
 function transitionKind(from,to) {
+  if(mainTabs.has(from)&&mainTabs.has(to))return 'instant';
   if (to.endsWith('/invite')) return 'present';
   if (from.endsWith('/invite')) return 'dismiss';
   if (!from.startsWith('/event/') && !to.startsWith('/event/')) {const order=['/','/events','/search','/activity','/profile'];return order.indexOf(to)<order.indexOf(from)?'back':'forward';}
   return to.split('/').filter(Boolean).length < from.split('/').filter(Boolean).length ? 'back' : 'forward';
 }
 function backTarget() {
-  if(!currentRoute||currentRoute==='/'||currentRoute.endsWith('/invite'))return null;
+  if(!currentRoute||mainTabs.has(currentRoute)||currentRoute.endsWith('/invite'))return null;
   const parts=currentRoute.split('/').filter(Boolean);
   return parts[0]==='event'&&parts.length>2?`/event/${parts[1]}`:'/';
 }
@@ -366,7 +386,7 @@ function render({background=false}={}) {
     else if (parts[0]==='event' && !event) markup = `${topbar('/')}<div class="not-found">${empty('Event unavailable','This event could not be found.','calendar')}<a class="primary-button" href="#/">Back to home</a></div>`;
     else if (event) markup = parts[2]==='guests' ? guestListPage(event) : eventPage(event);
     else if (parts[0]==='events' || parts[0]==='search') markup = eventListPage(parts[0]==='search');
-    else if (parts[0]==='activity') markup = `<div class="activity-view">${topbar('/','Activity')}${empty('All caught up','Your invites, event updates, and +1 requests will show up here.','bell')}${nav('bell')}</div>`;
+    else if (parts[0]==='activity') markup = notificationsPage();
     else if (parts[0]==='profile') markup = profilePage();
     else markup = home();
     if(!restored){if(background)patchSurface(app,markup);else app.innerHTML=markup;}
@@ -395,9 +415,18 @@ function sheet(title, content) {
   dialog.showModal();
 }
 function rsvpSheet(id) {
-  const event = eventStore.getEvent(id);
-  if (event.source === 'doorlist') return sheet('RSVP in Doorlist', `<p class="dialog-description">${esc(event.title)}</p><p class="dialog-note">Open the official event to RSVP, request access, or purchase a ticket. Opening a generated QR preview does not RSVP or grant entry.</p><a class="primary-button" href="${esc(event.sourceUrl)}" target="_blank" rel="noopener noreferrer">Open Doorlist</a>`);
-  sheet('Will you be there?', `<p class="dialog-description">${esc(event.title)}</p><div class="rsvp-options">${[['going','👍','Going'],['maybe','🤔','Maybe'],['not-going','👎','Not going']].map(([status,emoji,label])=>`<button data-action="set-rsvp" data-id="${id}" data-status="${status}" aria-pressed="${event.rsvp===status}"><span>${emoji}</span>${label}${event.rsvp===status ? icon('check') : ''}</button>`).join('')}</div><p class="dialog-note">This preview saves your choice on this device.</p>`);
+  const event=eventStore.getEvent(id);if(!event)return;
+  const selected=['going','maybe','not-going'].includes(event.rsvp)?event.rsvp:'going';
+  sheet('RSVP',`<p class="rsvp-event-name">${esc(event.title)}</p><div class="native-rsvp-options">${[['going',icon('thumb'),"I'm in"],['maybe','🤔','Maybe'],['not-going','👎',"Can't go"]].map(([status,emoji,label])=>`<button data-action="select-rsvp" data-id="${id}" data-status="${status}" aria-pressed="${selected===status}"><span class="rsvp-orb rsvp-${status}">${emoji}</span><strong>${label}</strong></button>`).join('')}</div><p id="rsvpError" class="auth-error" role="alert"></p><button class="primary-button rsvp-confirm" data-action="set-rsvp" data-id="${id}" data-status="${selected}">Done</button>`);
+}
+async function shareEvent(id) {
+  const event=eventStore.getEvent(id);if(!event)return;
+  const url=event.sourceUrl||`${location.href.split('#')[0]}#/event/${id}`;
+  if(navigator.share){
+    try{await navigator.share({title:event.title,url});return;}
+    catch(error){if(error.name==='AbortError')return;}
+  }
+  sheet('Share event',`<div class="share-event-preview">${event.image?`<img src="${esc(event.image)}" alt="">`:''}<strong>${esc(event.title)}</strong></div><label class="auth-label" for="shareUrl">Event link</label><input id="shareUrl" class="auth-input" value="${esc(url)}" readonly><button class="primary-button" data-action="copy-link" data-id="${id}">${icon('share')}Copy link</button>`);
 }
 function plusOneSheet(id) {
   const event = eventStore.getEvent(id);
@@ -424,8 +453,19 @@ document.addEventListener('click', async event => {
     const person=eventStore.getSuggestedFriends().find(item=>item.id===id);
     sheet(person?.name || 'Add friends',`<p class="dialog-description">Find your people and manage friend requests in Doorlist.</p><a class="primary-button" href="https://doorlist.app" target="_blank" rel="noopener noreferrer">Open Doorlist ${icon('next')}</a>`);
   }
+  if(action==='preview-accept-request'){button.textContent='Accepted';button.disabled=true;button.parentElement.querySelector('[data-action="preview-dismiss-request"]')?.remove();notify('Preview request accepted');}
+  if(action==='preview-dismiss-request')button.closest('.notification-row').remove();
   if (action==='rsvp') rsvpSheet(id);
-  if (action==='set-rsvp') { eventStore.setRsvp(id,button.dataset.status); render(); notify(`RSVP saved: ${statusLabel(button.dataset.status)}`); }
+  if(action==='select-rsvp'){
+    dialog.querySelectorAll('[data-action="select-rsvp"]').forEach(option=>option.setAttribute('aria-pressed',String(option===button)));
+    dialog.querySelector('[data-action="set-rsvp"]').dataset.status=button.dataset.status;
+  }
+  if(action==='set-rsvp') {
+    button.disabled=true;button.textContent='Saving…';
+    try{await eventStore.setRsvp(id,button.dataset.status);dialog.close();renderDataUpdate();notify(`RSVP saved: ${statusLabel(button.dataset.status)}`);}
+    catch(error){const message=dialog.querySelector('#rsvpError');message.textContent=error.message;button.disabled=false;button.textContent='Try again';
+      if([403,409,503].includes(error.status)&&!dialog.querySelector('.rsvp-open-official')){const link=document.createElement('a');link.className='dialog-link rsvp-open-official';link.href=eventStore.getEvent(id).sourceUrl;link.target='_blank';link.rel='noopener noreferrer';link.textContent='Open event in Doorlist';message.after(link);}}
+  }
   if(action==='playlist-add')sheet('Shared Playlist',`<p class="dialog-description">Add songs with the other guests in Doorlist.</p><a class="primary-button" href="${esc(eventStore.getEvent(id).sourceUrl)}" target="_blank" rel="noopener noreferrer">Open Doorlist</a>`);
   if(action==='guest-retry'){guestBatchError='';loadNextGuestBatch(location.hash.split('/')[2]);}
   if (action==='guest-filter') {
@@ -437,7 +477,7 @@ document.addEventListener('click', async event => {
   }
   if (action==='settings') { if (eventStore.mode !== 'preview') connectionSheet(); else { window.InviteView.show(eventStore.listEvents()[0],eventStore.getProfile()); window.InviteView.settings(); } }
   if (action==='event-menu') sheet('Event options',`<a class="dialog-link" href="#/event/${id}/guests">${icon('people')}Guest list${icon('next')}</a><a class="dialog-link" href="#/event/${id}/invite">${icon('qr')}Your invite${icon('next')}</a><button class="dialog-link" data-action="rsvp" data-id="${id}">${icon('calendar')}Change RSVP${icon('next')}</button>`);
-  if (action==='share') sheet('Share event',`<p class="dialog-description">${esc(eventStore.getEvent(id).title)}</p><p class="dialog-note">${eventStore.mode === 'live' ? 'Copy the official Doorlist event link.' : 'Copy a link to this preview on your device.'}</p><button class="primary-button" data-action="copy-link" data-id="${id}">${icon('share')}${eventStore.mode === 'live' ? 'Copy event link' : 'Copy preview link'}</button>`);
+  if (action==='share') {await shareEvent(id);return;}
   if (action==='copy-link') { try { await navigator.clipboard.writeText(eventStore.getEvent(id).sourceUrl || `${location.href.split('#')[0]}#/event/${id}`); dialog.close(); notify('Event link copied'); } catch { notify('Link could not be copied. Use your browser’s address bar.'); } }
   if (action==='request-plus-one') { eventStore.requestPlusOne(id); dialog.close(); notify('+1 request saved in preview'); }
 });

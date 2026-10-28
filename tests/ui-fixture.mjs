@@ -13,6 +13,7 @@ const events = ['invited-fixture','discover-fixture','official-fixture'].map((id
 createDoorlistServer({port:4174,providerFactory:()=>({
   profile:null, clear(){this.profile=null;}, async sendCode(){},
   async verifyCode(){this.profile={id:'fixture-user',name:'Fixture User',photo:'profile.png'};return this.profile;},
+  async setRsvp(id,status){const event=events.find(event=>event.id===id);event.rsvp=status;return {event};},
   listProfiles(){return profiles;},
   async syncEvents(){if(process.env.FIXTURE_SLOW_REFRESH)await new Promise(resolve=>setTimeout(resolve,3000));return {events,profiles,suggestedFriends:[{id:'friend-one',name:'Jordan Lee',photo:'',mutualFriends:20},{id:'friend-two',name:'Alex Morgan',photo:'',mutualEvents:3},{id:'friend-three',name:'Riley Park',photo:'',mutualFriends:12},{id:'friend-four',name:'Taylor Chen',photo:'',mutualFriends:6}],profile:this.profile,coverage:{invited:2,discoverable:1,partial:false},syncedAt:new Date().toISOString()};},
   async loadEvent(id){return {...events.find(event=>event.id===id),detailsLoaded:true};},

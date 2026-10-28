@@ -31,3 +31,9 @@ test('SMS verification alone cannot authenticate a missing Doorlist profile',asy
   assert.equal(provider.profile,null);assert.equal(provider.accessToken,null);assert.equal(provider.allowedEvents.size,0);
  }
 });
+
+test('expired access tokens renew silently using the saved refresh token',async()=>{
+ let calls=0;const provider=new DoorlistProvider({clock:()=>500000,fetchImpl:async(_url,options)=>{calls++;assert.equal(JSON.parse(options.body).refresh_token,'saved-refresh');return Response.json({access_token:'renewed',refresh_token:'rotated',expires_in:3600});}});
+ provider.accessToken='expired';provider.refreshToken='saved-refresh';provider.expiresAt=1;
+ assert.deepEqual(await Promise.all([provider.token(),provider.token()]),['renewed','renewed']);assert.equal(calls,1);assert.equal(provider.refreshToken,'rotated');
+});

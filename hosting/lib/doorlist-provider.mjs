@@ -295,6 +295,7 @@ export class DoorlistProvider {
         merged.set(event.id, { ...cached, ...previous, ...event, goingCount:event.goingCount??previous?.goingCount??cached?.goingCount??null,
           background:normalizeBackground(raw,previous?.background||cached?.background)||previous?.background||cached?.background||null,
           fontFamily:normalizeEventFont(raw.fontFamily)||previous?.fontFamily||cached?.fontFamily||null,
+          rsvp:normalizeStatus(raw.rsvpStatus??cached?.rsvp??event.rsvp),hasAdmission:cached?.hasAdmission||false,
           guests:cached?.guests||[],guestsLoaded:cached?.guestsLoaded||false,guestListSource:cached?.guestListSource,
           access, canRsvp: access === 'invited' });
       }
@@ -430,6 +431,63 @@ export class DoorlistProvider {
     event.detailsRestricted = details.status === 'rejected';
     this.allowedEvents.set(id, event);
     return event;
+  }
+  async setRsvp(id, status) {
+    const event=this.requireEvent(id);
+    const nativeStatus={going:'going',maybe:'maybe','not-going':'notGoing'}[status];
+    if(!nativeStatus)throw new ProviderError('Choose an RSVP response.',400);
+    if(!this.profile?.id)throw new ProviderError('Sign in to RSVP.',401);
+    const eventPath=`eventObjects/${encodeURIComponent(id)}`;
+    const [eventDoc,guestResult]=await Promise.all([
+      this.firestore(eventPath),
+      this.firestore(`${eventPath}/guests/${encodeURIComponent(this.profile.id)}`).catch(error=>{if(error.status===404)return null;throw error;}),
+    ]);
+    const fields=decodeFields(eventDoc.fields),guest=decodeFields(guestResult?.fields||{});
+    const tiers=Object.values(fields.tieredEventData||{});
+    const paidOrTiered=Boolean(fields.isPaidEvent)||tiers.length>1||tiers.some(tier=>Number(tier.tierPrice)>0);
+    if(Number(guest.ticketCount)>0) {
+      // Only the authenticated user's admitted guest record is updated. Firestore
+      // permissions and both document versions are checked again at commit time.
+      const token=await this.firebase();
+      const names=['rsvpStatus','uuid','eventID'];
+      await this.request(`https://firestore.googleapis.com/v1/projects/${this.config.firebaseProjectId}/databases/(default)/documents:commit`,{
+        method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},
+        body:JSON.stringify({writes:[
+          {verify:eventDoc.name,currentDocument:{updateTime:eventDoc.updateTime}},
+          {update:{name:guestResult.name,fields:{rsvpStatus:{stringValue:nativeStatus},uuid:{stringValue:this.profile.id},eventID:{stringValue:id}}},
+            updateMask:{fieldPaths:names},updateTransforms:[{fieldPath:'rsvpTime',setToServerValue:'REQUEST_TIME'}],currentDocument:{updateTime:guestResult.updateTime}},
+        ]}),
+      });
+    } else if(fields.joinByLinkRequiresApproval===false&&!paidOrTiered&&['EventVisibility.LINK','EventVisibility.PUBLIC'].includes(fields.visibility)) {
+      await this.rsvpOpenEvent(event,nativeStatus);
+    } else {
+      throw new ProviderError('Open this event in Doorlist to request access or get a ticket before RSVPing.',403,'doorlist_rsvp_access_required');
+    }
+    // A successful upstream write is required before changing any local status.
+    const previous=event.rsvp;
+    const next={...event,rsvp:status,hasAdmission:true};
+    if(Number.isInteger(event.goingCount)&&previous!==status)next.goingCount=Math.max(0,event.goingCount+(status==='going'?1:0)-(previous==='going'?1:0));
+    next.guests=(event.guests||[]).map(person=>person.id===this.profile.id?{...person,status,attendanceVerified:true}:person);
+    this.allowedEvents.set(id,next);
+    return {event:next};
+  }
+  async rsvpOpenEvent(event,nativeStatus) {
+    // Resolve the action identifier from Doorlist's current published client,
+    // rather than manufacturing admission with a direct guest-document write.
+    let sourceResponse;
+    try{sourceResponse=await this.fetch('https://doorlist.app/_next/static/chunks/0wdqya~a.4t37.js',{signal:AbortSignal.timeout(15000),redirect:'error'});}catch{throw new ProviderError('Doorlist could not be reached. Try again.',502);}
+    if(!sourceResponse.ok)throw new ProviderError('Open this event in Doorlist to finish your RSVP.',503);
+    const source=await sourceResponse.text();
+    const action=/createServerReference\)\("([a-f0-9]{40,64})"[^;]{0,200}?"rsvpForOpenFreeEvent"/.exec(source)?.[1];
+    if(!action)throw new ProviderError('Open this event in Doorlist to finish your RSVP.',503);
+    const token=await this.token();
+    let response;
+    try{response=await this.fetch(event.sourceUrl,{method:'POST',headers:{'Content-Type':'text/plain;charset=UTF-8','Accept':'text/x-component','Next-Action':action,'Origin':'https://doorlist.app'},body:JSON.stringify([token,event.id,nativeStatus]),signal:AbortSignal.timeout(20000),redirect:'error'});}
+    catch{throw new ProviderError('Doorlist could not confirm your RSVP. Check it in Doorlist before trying again.',502);}
+    const text=await response.text();
+    const results=text.split('\n').flatMap(line=>{const value=/^[0-9a-f]+:(\{.*\})$/.exec(line)?.[1];try{return value?[JSON.parse(value)]:[];}catch{return [];}});
+    const result=results.find(value=>Number.isInteger(value.status));
+    if(!response.ok||result?.status!==200)throw new ProviderError('Doorlist could not save that RSVP. Open the event in Doorlist to check access and availability.',response.status===401?401:409);
   }
   async loadGuests(id, options = {}) {
     this.requireEvent(id);

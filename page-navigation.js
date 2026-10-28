@@ -131,7 +131,7 @@ export function createPageNavigation({app,invite,onActivate=()=>{},onActivity=()
         settle(notify);
       };
       motion={cancel:finishMotion};
-      if(matchMedia('(prefers-reduced-motion: reduce)').matches||incoming===outgoing){finishMotion();return;}
+      if(kind==='instant'||matchMedia('(prefers-reduced-motion: reduce)').matches||incoming===outgoing){finishMotion();return;}
       const back=kind==='back',present=kind==='present',dismiss=kind==='dismiss';
       const start=present?'translate3d(0,100%,0)':back?`translate3d(${-28*(1-progress)}%,0,0)`:dismiss?'translate3d(0,0,0)':'translate3d(100%,0,0)';
       const oldStart=back?`translate3d(${100*progress}%,0,0)`:'translate3d(0,0,0)';

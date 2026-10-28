@@ -30,7 +30,8 @@ async function readBody(request: Request) {
   if(text.length>8192)throw new ProviderError('Request too large.',413);
   try{return JSON.parse(text||'{}');}catch{throw new ProviderError('Invalid request.',400);}
 }
-const cookie = (id: string,secure:boolean) => `doorlist_session=${id}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200${secure?'; Secure':''}`;
+const SESSION_SECONDS=30*24*60*60;
+const cookie = (id: string,secure:boolean,authenticated=true) => `doorlist_session=${id}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${authenticated?SESSION_SECONDS:600}${secure?'; Secure':''}`;
 async function limit(db:D1Database,env:Runtime,value:string,max:number,cooldown:number) {
   const id=await digest(`${env.SESSION_ENCRYPTION_KEY}:${value}`),now=Date.now(),window=15*60000;
   const row=await db.prepare(`INSERT INTO doorlist_auth_limits (id,started_at,last_at,attempts) VALUES (?,?,?,1)
@@ -67,7 +68,7 @@ async function saveSession(session:any,env:Runtime) {
       suggestedFriends:p.suggestedFriends,coverage:p.coverage,syncedAt:p.syncedAt}};
   const cipher=await encryptSession(data,env,session.id);
   await env.DB!.prepare('INSERT INTO doorlist_sessions(id,ciphertext,expires_at) VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET ciphertext=excluded.ciphertext,expires_at=excluded.expires_at')
-    .bind(session.id,cipher,Date.now()+12*3600000).run();
+    .bind(session.id,cipher,Date.now()+(p.profile?SESSION_SECONDS:600)*1000).run();
 }
 export async function handleDoorlist(request:Request,env:Runtime) {
   const url=new URL(request.url);
@@ -103,7 +104,7 @@ export async function handleDoorlist(request:Request,env:Runtime) {
       await saveSession(session,env);
       await env.DB.prepare('DELETE FROM doorlist_sessions WHERE expires_at<?').bind(Date.now()).run();
       await env.DB.prepare('DELETE FROM doorlist_auth_limits WHERE last_at<?').bind(Date.now()-15*60000).run();
-      return reply({sent:true,phoneHint:`••• ${phone.slice(-4)}`},200,{'Set-Cookie':cookie(session.raw,url.protocol==='https:')});
+      return reply({sent:true,phoneHint:`••• ${phone.slice(-4)}`},200,{'Set-Cookie':cookie(session.raw,url.protocol==='https:',Boolean(session.provider.profile))});
     }
     if(request.method==='POST'&&url.pathname==='/api/auth/verify') {
       const body=await readBody(request);
@@ -123,17 +124,26 @@ export async function handleDoorlist(request:Request,env:Runtime) {
     }
     if(!session?.provider.profile)throw new ProviderError('Sign in to connect your Doorlist events.',401);
     const p=session.provider;
+    const sessionHeaders={'Set-Cookie':cookie(session.raw,url.protocol==='https:')};
     if(request.method==='GET'&&url.pathname==='/api/profiles')return reply({profiles:p.listProfiles(),scope:'signed-in-account'});
     if(request.method==='GET'&&url.pathname==='/api/events') {
-      const result=await p.syncEvents();await saveSession(session,env);return reply(result);
+      const result=await p.syncEvents();await saveSession(session,env);return reply(result,200,sessionHeaders);
     }
+    const rsvp=/^\/api\/events\/([\w-]{5,100})\/rsvp$/.exec(url.pathname);
+    if(request.method==='POST'&&rsvp){const data=await readBody(request);const result=await p.setRsvp(rsvp[1],data.status);await saveSession(session,env);return reply(result,200,sessionHeaders);}
     const match=/^\/api\/events\/([\w-]{5,100})(?:\/(guests|invite))?$/.exec(url.pathname);
     if(request.method==='GET'&&match) {
       const result=match[2]==='guests'?await p.loadGuests(match[1],{cursor:url.searchParams.get('cursor')||'',pageLimit:5,enrichPhotos:true}):match[2]==='invite'?await p.loadInvite(match[1]):{event:await p.loadEvent(match[1])};
-      await saveSession(session,env);return reply(result);
+      await saveSession(session,env);return reply(result,200,sessionHeaders);
     }
     return reply({error:'Not found.'},404);
   } catch(error:any) {
+    // A successful token rotation must survive a later, temporary feed failure.
+    // A rejected authenticated session is revoked rather than kept in storage.
+    if(session?.provider.profile) {
+      if(error.status===401){await env.DB!.prepare('DELETE FROM doorlist_sessions WHERE id=?').bind(session.id).run();}
+      else {try{await saveSession(session,env);}catch{/* Preserve the original error. */}}
+    }
     if(error instanceof ProviderError&&error.code&&/^\/api\/auth\/(code|verify)$/.test(url.pathname))console.warn('doorlist_auth_failure',{stage:url.pathname.endsWith('/code')?'send_code':'verify_code',status:error.status,reason:error.code});
     return reply({error:error instanceof ProviderError?error.message:'The app could not complete this request.'},error instanceof ProviderError?error.status:500);
   }

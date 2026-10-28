@@ -11,8 +11,17 @@
 <link rel="icon" type="image/png" href="icon-192.png" />
 <link rel="manifest" href="manifest.webmanifest" />
 <title>Doorlist</title>
+<script>
+// GitHub Pages is the entry point; account connections run on the hosted app.
+if (location.hostname === 'josh-roe.github.io' && location.pathname.startsWith('/Doorlist-UI-Test')) {
+  const destination = new URL('https://doorlist-mobile-josh-roe.fairrose12.chatgpt.site/mobile/');
+  destination.hash = location.hash;
+  location.replace(destination.href);
+}
+</script>
+
 <link rel="stylesheet" href="style.css" />
-<link rel="stylesheet" href="app.css?v=native-type-3" />
+<link rel="stylesheet" href="app.css?v=notifications-1" />
 </head>
 <body>
   <main id="appView" class="mobile-app"></main>
@@ -151,6 +160,6 @@
   <dialog id="actionDialog" class="action-dialog" aria-labelledby="actionTitle"></dialog>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script src="script.js"></script>
-  <script type="module" src="app.js?v=auth-errors-1"></script>
+  <script type="module" src="app.js?v=persistent-tabs-1"></script>
 </body>
 </html>

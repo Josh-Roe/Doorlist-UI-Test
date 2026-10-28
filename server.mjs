@@ -4,7 +4,8 @@ import { randomUUID, createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { DoorlistProvider, ProviderError } from './doorlist-provider.mjs';
 
-const files = new Set(['index.html', 'app.js', 'app.css', 'event-store.js', 'page-navigation.js', 'event-identity.js', 'avatar.js', 'guest-list.js', 'demo-store.js', 'script.js', 'style.css', 'manifest.webmanifest', 'profile.png', 'event.png', 'qr.svg', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png', 'assets/doorlist-bar-crawl.png', 'assets/doorlist-birthday.png', 'assets/doorlist-study-sesh.png', 'assets/doorlist-sunday-scaries.png', 'assets/doorlist-warm-up.png', 'assets/doorlist-watch-party.png', 'assets/doorlist-host-stack.png']);
+const SESSION_SECONDS=30*24*60*60;
+const files = new Set(['index.html', 'app.js', 'app.css', 'event-store.js', 'notification-feed.js', 'page-navigation.js', 'event-identity.js', 'avatar.js', 'guest-list.js', 'demo-store.js', 'script.js', 'style.css', 'manifest.webmanifest', 'profile.png', 'event.png', 'qr.svg', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png', 'assets/doorlist-bar-crawl.png', 'assets/doorlist-birthday.png', 'assets/doorlist-study-sesh.png', 'assets/doorlist-sunday-scaries.png', 'assets/doorlist-warm-up.png', 'assets/doorlist-watch-party.png', 'assets/doorlist-host-stack.png']);
 const mime = { html: 'text/html; charset=utf-8', js: 'text/javascript; charset=utf-8', css: 'text/css; charset=utf-8', webmanifest: 'application/manifest+json', png: 'image/png', svg: 'image/svg+xml' };
 export function createDoorlistServer({ providerFactory = () => new DoorlistProvider(), clock = Date.now, port = Number(process.env.PORT || 4173) } = {}) {
   const sessions = new Map(); const codeLimits = new Map();
@@ -22,10 +23,11 @@ export function createDoorlistServer({ providerFactory = () => new DoorlistProvi
   function getSession(req) {
     const cookie = /(?:^|;\s*)doorlist_session=([a-f0-9-]{36})(?:;|$)/.exec(req.headers.cookie || '');
     const session = cookie && sessions.get(cookie[1]);
-    if (session && session.touched + 12 * 60 * 60 * 1000 > clock()) { session.touched = clock(); return session; }
+    if (session && session.touched + (session.provider.profile?SESSION_SECONDS:600)*1000 > clock()) { session.touched = clock(); return session; }
     if (session) { session.provider.clear(); sessions.delete(cookie[1]); }
     return null;
   }
+  function sessionCookie(session,secure){return `doorlist_session=${session.id}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${session.provider.profile?SESSION_SECONDS:600}${secure?'; Secure':''}`;}
   function needSession(req) {
     const session = getSession(req);
     if (!session?.provider.profile) throw new ProviderError('Sign in to connect your Doorlist events.', 401);
@@ -47,6 +49,7 @@ export function createDoorlistServer({ providerFactory = () => new DoorlistProvi
         }
         if (req.method === 'GET' && url.pathname === '/api/session') {
           const session = getSession(req);
+          if(session?.provider.profile)res.setHeader('Set-Cookie',sessionCookie(session,origin.startsWith('https:')));
           return json(res, 200, { authenticated: Boolean(session?.provider.profile), profile: session?.provider.profile || null, ...(session?.provider.profile&&session.provider.snapshot?{snapshot:session.provider.snapshot()}: {}) });
         }
         if (req.method === 'POST' && url.pathname === '/api/auth/code') {
@@ -63,7 +66,7 @@ export function createDoorlistServer({ providerFactory = () => new DoorlistProvi
           if (!session) { session = { id: randomUUID(), touched: clock(), provider: providerFactory() }; sessions.set(session.id, session); }
           await session.provider.sendCode(phone);
           session.phone = phone; session.codeTime = clock(); session.attempts = 0;
-          res.setHeader('Set-Cookie', `doorlist_session=${session.id}; HttpOnly; SameSite=Strict; Path=/${origin.startsWith('https:') ? '; Secure' : ''}`);
+          res.setHeader('Set-Cookie', sessionCookie(session,origin.startsWith('https:')));
           return json(res, 200, { sent: true, phoneHint: `••• ${phone.slice(-4)}` });
         }
         if (req.method === 'POST' && url.pathname === '/api/auth/verify') {
@@ -73,6 +76,7 @@ export function createDoorlistServer({ providerFactory = () => new DoorlistProvi
           if (++session.attempts > 6) throw new ProviderError('Request a new sign-in code before trying again.', 429);
           const profile = await session.provider.verifyCode(session.phone, String(data.code));
           delete session.phone;
+          res.setHeader('Set-Cookie',sessionCookie(session,origin.startsWith('https:')));
           return json(res, 200, { authenticated: true, profile });
         }
         if (req.method === 'POST' && url.pathname === '/api/auth/disconnect') {
@@ -83,6 +87,8 @@ export function createDoorlistServer({ providerFactory = () => new DoorlistProvi
         }
         if(req.method==='GET'&&url.pathname==='/api/profiles')return json(res,200,{profiles:needSession(req).provider.listProfiles(),scope:'signed-in-account'});
         if (req.method === 'GET' && url.pathname === '/api/events') return json(res, 200, await needSession(req).provider.syncEvents());
+        const rsvp=/^\/api\/events\/([\w-]{5,100})\/rsvp$/.exec(url.pathname);
+        if(req.method==='POST'&&rsvp){const session=needSession(req);const data=await body(req);return json(res,200,await session.provider.setRsvp(rsvp[1],data.status));}
         const match = /^\/api\/events\/([\w-]{5,100})(?:\/(guests|invite))?$/.exec(url.pathname);
         if (req.method === 'GET' && match) {
           const provider = needSession(req).provider;
@@ -107,7 +113,7 @@ export function createDoorlistServer({ providerFactory = () => new DoorlistProvi
     if (port === 0) { const actualPort = server.address().port; allowedHosts.add(`127.0.0.1:${actualPort}`); allowedHosts.add(`localhost:${actualPort}`); }
   });
   const cleanup = setInterval(() => {
-    for (const [id, session] of sessions) if (session.touched + 12 * 3600000 < clock()) { session.provider.clear(); sessions.delete(id); }
+    for (const [id, session] of sessions) if (session.touched + (session.provider.profile?SESSION_SECONDS:600)*1000 < clock()) { session.provider.clear(); sessions.delete(id); }
     for (const [key, value] of codeLimits) if (value.last + 15 * 60000 < clock()) codeLimits.delete(key);
   }, 60000);
   cleanup.unref(); server.on('close', () => { clearInterval(cleanup); for (const session of sessions.values()) session.provider.clear(); });

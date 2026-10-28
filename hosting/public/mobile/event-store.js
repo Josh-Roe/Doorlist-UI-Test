@@ -1,7 +1,7 @@
 import { deduplicateEvents } from './event-identity.js';
 import { eventStore as demoStore } from './demo-store.js';
 const CACHE_KEY='doorlist-account-view-v1';
-const CACHE_TTL=12*60*60*1000;
+const CACHE_TTL=30*24*60*60*1000;
 const blankProfile=()=>({name:'You',photo:'profile.png'});
 function browserStorage(){try{return typeof window==='undefined'?null:window.localStorage;}catch{return null;}}
 export function createEventStore({fetchImpl=(...args)=>fetch(...args),storage=browserStorage(),clock=Date.now}={}) {
@@ -126,7 +126,13 @@ export function createEventStore({fetchImpl=(...args)=>fetch(...args),storage=br
       persist();return {...result,guests,generated:source==='profile-cache',source};
     },
     loadInvite:id=>request(`/api/events/${encodeURIComponent(id)}/invite`),
-    setRsvp(id,value){if(mode==='preview')return demoStore.setRsvp(id,value);},
+    async setRsvp(id,value){
+      if(mode==='preview'){const result=demoStore.setRsvp(id,value);emit();return result;}
+      const generation=epoch;
+      const result=await request(`/api/events/${encodeURIComponent(id)}/rsvp`,{status:value});
+      if(generation!==epoch)return;
+      const index=events.findIndex(event=>event.id===id);if(index>=0)events[index]={...events[index],...result.event};persist();emit();return result;
+    },
     updateEvent(id,value){if(mode==='preview')return demoStore.updateEvent(id,value);},
     updateProfile(value){if(mode==='preview')return demoStore.updateProfile(value);},
     requestPlusOne(id){if(mode==='preview')return demoStore.requestPlusOne(id);},

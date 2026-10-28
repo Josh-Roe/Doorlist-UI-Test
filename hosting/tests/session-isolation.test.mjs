@@ -42,3 +42,20 @@ test('the saved profile dataset is encrypted and scoped to the signed-in account
  const anonymous=await handleDoorlist(new Request('https://test.example/api/profiles'),runtime);
  assert.equal(anonymous.status,401);
 });
+
+test('persistent authenticated sessions renew after reopening days later and logout revokes storage',async t=>{
+ let now=Date.now();t.mock.method(Date,'now',()=>now);
+ const raw=crypto.randomUUID(),id=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(raw))),b=>b.toString(16).padStart(2,'0')).join('');
+ let row={ciphertext:await encryptSession({provider:{profile:{id:'returning-user',name:'Returning user'},allowedEvents:[],profilePool:[],refreshToken:'test-private-refresh'}},env,id),expires_at:now+30*86400000};
+ const runtime={...env,DB:{prepare(sql){return{bind(...args){return{
+  first:async()=>args[0]===id?row:null,
+  run:async()=>{if(sql.startsWith('INSERT INTO doorlist_sessions'))row={ciphertext:args[1],expires_at:args[2]};else if(sql.startsWith('DELETE'))row=null;return{success:true};},
+ };}};}}};
+ now+=7*86400000;
+ const reopened=await handleDoorlist(new Request('https://test.example/api/session',{headers:{Cookie:`doorlist_session=${raw}`}}),runtime);
+ assert.equal((await reopened.json()).profile.id,'returning-user');assert.match(reopened.headers.get('set-cookie'),/Max-Age=2592000/);assert.match(reopened.headers.get('set-cookie'),/HttpOnly/);assert.match(reopened.headers.get('set-cookie'),/Secure/);assert.equal(row.expires_at,now+30*86400000);
+ const saved=await decryptSession(row.ciphertext,env,id);assert.equal(saved.provider.refreshToken,'test-private-refresh');
+ const signout=await handleDoorlist(new Request('https://test.example/api/auth/disconnect',{method:'POST',headers:{Origin:'https://test.example','X-Doorlist-Client':'mobile-ui','Content-Type':'application/json',Cookie:`doorlist_session=${raw}`},body:'{}'}),runtime);
+ assert.equal(signout.status,200);assert.match(signout.headers.get('set-cookie'),/Max-Age=0/);assert.equal(row,null);
+ assert.equal((await (await handleDoorlist(new Request('https://test.example/api/session',{headers:{Cookie:`doorlist_session=${raw}`}}),runtime)).json()).authenticated,false);
+});

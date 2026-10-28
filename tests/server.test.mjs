@@ -70,3 +70,19 @@ test('common US phone formats and an explicit international number normalize bef
  }
  assert.deepEqual(phones,['+14155550123','+14155550123','+14155550123','+442079460123']);
 });
+
+test('verified sessions survive closing the app and reopening days later, then sign out revokes them',async t=>{
+ let now=Date.now();const server=createDoorlistServer({port:0,clock:()=>now,providerFactory:fixture});
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>server.close(resolve)));
+ const base=`http://127.0.0.1:${server.address().port}`;
+ const headers={Origin:base,'Content-Type':'application/json','X-Doorlist-Client':'mobile-ui'};
+ const sent=await fetch(base+'/api/auth/code',{method:'POST',headers,body:JSON.stringify({phone:'+15555550123'})});await sent.json();
+ const cookie=sent.headers.get('set-cookie').split(';')[0];
+ const verified=await fetch(base+'/api/auth/verify',{method:'POST',headers:{...headers,Cookie:cookie},body:JSON.stringify({code:'123456'})});await verified.json();
+ assert.match(verified.headers.get('set-cookie'),/Max-Age=2592000/);
+ now+=7*86400000;
+ const reopened=await fetch(base+'/api/session',{headers:{Cookie:cookie}});
+ assert.equal((await reopened.json()).authenticated,true);assert.match(reopened.headers.get('set-cookie'),/Max-Age=2592000/);
+ const out=await fetch(base+'/api/auth/disconnect',{method:'POST',headers:{...headers,Cookie:cookie},body:'{}'});await out.json();
+ assert.equal((await (await fetch(base+'/api/session',{headers:{Cookie:cookie}})).json()).authenticated,false);
+});
