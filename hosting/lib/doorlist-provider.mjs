@@ -125,6 +125,24 @@ const eventFontFamilies=new Set(['Bartle','BricolageGrotesque','Glitch','Graffit
 export function normalizeEventFont(value) {
   return typeof value==='string' && eventFontFamilies.has(value.trim()) ? value.trim() : null;
 }
+const themeColor=value=>{
+  if(typeof value!=='string')return null;
+  const text=value.trim();if(/^#(?:[a-f0-9]{3}|[a-f0-9]{6}|[a-f0-9]{8})$/i.test(text))return text;
+  const rgb=/^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*(0|1|0?\.\d+))?\s*\)$/i.exec(text);
+  if(!rgb||rgb.slice(1,4).some(channel=>Number(channel)>255)||Number(rgb[4]??1)>1)return null;
+  return '#'+rgb.slice(1,4).map(channel=>Number(channel).toString(16).padStart(2,'0')).join('')+(rgb[4]===undefined?'':Math.round(Number(rgb[4])*255).toString(16).padStart(2,'0'));
+};
+export function normalizeRsvpAppearance(event={},theme=null) {
+  const palette=theme?.colorPalette||event.photoColorPalette||{};
+  const gradients=(theme?.gradientColors||palette.gradientColors||[]);
+  return {themeUrl:typeof event.themeURL==='string'?event.themeURL:'',
+    background:themeColor(palette.bgColor||palette.bottomColor||palette.accentColor),
+    accent:themeColor(palette.accentColor),
+    gradientColors:Array.isArray(gradients)?gradients.map(themeColor).filter(Boolean).slice(0,4):[],
+    style:['Default','Hearts','Nature','Monkeys','Drink','Moon','Food'].includes(event.rsvpLottieStyle)?event.rsvpLottieStyle:'Default',
+    customEmoji:typeof event.customEmojiOverride==='string'?event.customEmojiOverride.slice(0,60):'',
+    commentsEnabled:event.isEventChatAllowed!==false};
+}
 export function normalizeEvent(event, access = 'discover') {
   const id = String(event.eventId || event.id || '');
   if (!/^[\w-]{5,100}$/.test(id) || !event.name) return null;
@@ -135,7 +153,7 @@ export function normalizeEvent(event, access = 'discover') {
     hostId: String(event.orgFBid || event.orgID || event.hostID || ''),
     hostPhoto: safeImage(event.orgCoverPhoto || event.hostPhoto || event.hostProfilePicture),
     image: safeImage(event.eventCoverCroppedURL || event.eventCoverURL || event.coverPhotoURL),
-    theme: 'purple', background: normalizeBackground(event), fontFamily:normalizeEventFont(event.fontFamily), startsAt: start, endsAt: end,
+    theme: 'purple', rsvpAppearance:normalizeRsvpAppearance(event), background: normalizeBackground(event), fontFamily:normalizeEventFont(event.fontFamily), startsAt: start, endsAt: end,
     ...normalizeLocation(event.locationReadable && Object.values(event.locationReadable).some(Boolean) ? event.locationReadable : event.location, String(event.locationName || event.address || '')),
     goingCount:event.goingCount!=null&&Number.isInteger(Number(event.goingCount))&&Number(event.goingCount)>=0?Number(event.goingCount):null,
     description: String(event.description || ''), rsvp: 'invited', canRsvp: access === 'invited',
@@ -143,6 +161,13 @@ export function normalizeEvent(event, access = 'discover') {
     isPaidEvent: Boolean(event.isPaidEvent), guests: [], guestsLoaded: false, guestListPartial: false,
     plusOneRequested: false, detailsLoaded: false,
   };
+}
+export function profileShareUrl(uuid,shortId='') {
+  if(!/^[a-f0-9-]{36}$/i.test(uuid||''))return '';
+  const shifted=Array.from(uuid.trim(),char=>/[a-z]/i.test(char)?String.fromCharCode((char.toLowerCase().charCodeAt(0)-97+3)%26+(char===char.toUpperCase()?65:97)):/\d/.test(char)?String((Number(char)+3)%10):char==='-'?String.fromCharCode(97+randomInt(26)):char).reverse().join('');
+  const padding=n=>Array.from({length:n},()=>String.fromCharCode(97+randomInt(26))).join('');
+  const full=padding(10)+shifted+padding(8),middle=Math.floor(full.length/2);
+  return `https://doorlist.app/p/${full.slice(middle)+full.slice(0,middle)}${/^[a-z0-9_-]{1,50}$/i.test(shortId)?`?s=${encodeURIComponent(shortId)}`:''}`;
 }
 function obfuscatePhone(phone) {
   const letter = () => String.fromCharCode(97 + randomInt(26));
@@ -167,7 +192,7 @@ export class DoorlistProvider {
   }
   listProfiles() { return [...this.profilePool.values()].map(person=>({...person})); }
   snapshot() {
-    return {events:[...this.allowedEvents.values()],profile:this.profile,profiles:this.listProfiles(),suggestedFriends:this.suggestedFriends||[],coverage:this.coverage||null,syncedAt:this.syncedAt||null};
+    return {events:[...this.allowedEvents.values()].filter(event=>!event.endsAt||new Date(event.endsAt).getTime()>this.clock()),profile:this.profile,profiles:this.listProfiles(),suggestedFriends:this.suggestedFriends||[],coverage:this.coverage||null,syncedAt:this.syncedAt||null};
   }
   profileSuggestions(eventId) {
     this.requireEvent(eventId);
@@ -295,6 +320,7 @@ export class DoorlistProvider {
         merged.set(event.id, { ...cached, ...previous, ...event, goingCount:event.goingCount??previous?.goingCount??cached?.goingCount??null,
           background:normalizeBackground(raw,previous?.background||cached?.background)||previous?.background||cached?.background||null,
           fontFamily:normalizeEventFont(raw.fontFamily)||previous?.fontFamily||cached?.fontFamily||null,
+          rsvpAppearance:cached?.rsvpAppearance?.themeResolved&&(!raw.themeURL||raw.themeURL===cached.rsvpAppearance.themeUrl)?{...cached.rsvpAppearance,...(raw.rsvpLottieStyle?{style:normalizeRsvpAppearance(raw).style}:{})}:event.rsvpAppearance,
           rsvp:normalizeStatus(raw.rsvpStatus??cached?.rsvp??event.rsvp),hasAdmission:cached?.hasAdmission||false,
           guests:cached?.guests||[],guestsLoaded:cached?.guestsLoaded||false,guestListSource:cached?.guestListSource,
           access, canRsvp: access === 'invited' });
@@ -401,9 +427,72 @@ export class DoorlistProvider {
     }));
   }
   requireEvent(id) {
-    const event = this.allowedEvents.get(id);
+    const event = this.allowedEvents.get(id)||this.profile?.events?.find(event=>event.id===id);
     if (!event) throw new ProviderError('Refresh Your events before opening this event.', 404);
     return event;
+  }
+  async loadProfile() {
+    if(!this.profile?.id)throw new ProviderError('Sign in to open your profile.',401);
+    const user=await this.api(`/api/users/uuid/${encodeURIComponent(this.profile.id)}`);
+    if(user.uuid&&String(user.uuid).toLowerCase()!==this.profile.id.toLowerCase())throw new ProviderError('Your profile could not be loaded.',502);
+    const friendsKnown=Array.isArray(user.friends);
+    const ids=[...new Set((friendsKnown?user.friends:[]).filter(id=>typeof id==='string'&&/^[\w-]{1,100}$/.test(id)))].slice(0,1000);
+    let friends=null,groups=null,profileEvents=null,eventCount=null;
+    try {
+      if(!friendsKnown)throw new Error('Friends were not included in the profile response.');
+      const rows=await Promise.all(Array.from({length:Math.ceil(ids.length/100)},(_,i)=>this.api('/api/users/light_details',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({uuids:ids.slice(i*100,i*100+100)})})));
+      const details=Object.assign({},...rows);
+      friends=ids.map(id=>{const person=details[id]||details[id.toUpperCase()]||details[id.toLowerCase()];return person?.name?{id,name:String(person.name),photo:safeImage(person.profilePicture||person.profilePictureUrl||person.profilePhotoUrl),url:profileShareUrl(id)}:null;}).filter(Boolean);
+      this.rememberProfiles(friends);
+    }catch{/* Keep previously loaded friends if their photos are temporarily unavailable. */}
+    try {
+      const data=await this.api(`/api/users/groups/${encodeURIComponent(this.profile.id)}`);
+      const rows=Array.isArray(data)?data:Array.isArray(data.groups)?data.groups:Array.isArray(data.all)?data.all.map(id=>({id})):[];
+      groups=rows.map(group=>({id:String(group.id||group.uuid||''),name:String(group.name||group.orgName||'Group'),photo:safeImage(group.orgCoverPhoto||group.profilePicture||group.image)})).filter(group=>group.id);
+    }catch{/* Group access is optional. */}
+    try {
+      const token=await this.token(),result=await this.api(`/api/events/profile/${encodeURIComponent(this.profile.id)}?token=${encodeURIComponent(token)}`);
+      const rows=Array.isArray(result.lightEvents)?result.lightEvents:Array.isArray(result.events)?result.events:[];
+      eventCount=Number.isInteger(result.eventCount)&&result.eventCount>=0?result.eventCount:rows.length;
+      profileEvents=rows.map(raw=>{const event=normalizeEvent(raw,'invited');return event?{...this.allowedEvents.get(event.id),...event}:null;}).filter(Boolean);
+      if(eventCount>profileEvents.length)profileEvents=await this.loadOwnPastEvents(profileEvents);
+    }catch{/* Saved profile events remain visible when the upstream feed is unavailable. */}
+    this.profile={...this.profile,name:String(user.name||this.profile.name),photo:safeImage(user.profilePicture||user.profilePhotoUrl)||this.profile.photo,
+      school:String(user.school||this.profile.school||''),bio:String(user.bio||''),shortId:String(user.shortID||this.profile.shortId||''),
+      ...(friendsKnown?{friendCount:ids.length}:{}),...(friends?{friends}:{}),...(groups?{groups,groupCount:groups.length}:{}),
+      ...(profileEvents?{events:profileEvents}:{}),eventCount:eventCount??profileEvents?.length??this.coverage?.sources?.profile?.count??this.profile.eventCount??null,detailsVersion:2,detailsUpdatedAt:this.clock()};
+    this.profile.shareUrl=this.profile.shareUrl||profileShareUrl(this.profile.id,this.profile.shortId);
+    if(this.profile.shareUrl&&!this.profile.shareQr)this.profile.shareQr=await QRCode.toString(this.profile.shareUrl,{type:'svg',margin:1,color:{dark:'#ffffff',light:'#00000000'}});
+    this.rememberProfiles([this.profile]);
+    return {profile:this.profile,profiles:this.listProfiles()};
+  }
+  async loadOwnPastEvents(existing) {
+    try {
+      const token=await this.firebase();
+      const rows=await this.request(`https://firestore.googleapis.com/v1/projects/${this.config.firebaseProjectId}/databases/(default)/documents:runQuery`,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({structuredQuery:{from:[{collectionId:'guests',allDescendants:true}],where:{fieldFilter:{field:{fieldPath:'uuid'},op:'EQUAL',value:{stringValue:this.profile.id}}},limit:100}})});
+      const known=new Set(existing.map(event=>event.id)),ids=[];
+      for(const row of Array.isArray(rows)?rows:[]){const guest=decodeFields(row.document?.fields||{}),id=String(guest.eventID||'');if(String(guest.uuid||'').toLowerCase()!==this.profile.id.toLowerCase()||known.has(id)||!/^([\w-]{5,100})$/.test(id))continue;known.add(id);ids.push(id);}
+      const past=[];const queue=ids.slice(0,50);
+      await Promise.all(Array.from({length:Math.min(4,queue.length)},async()=>{
+        while(queue.length){const id=queue.shift();try{const document=await this.firestore(`eventObjects/${encodeURIComponent(id)}`),event=normalizeEvent({...decodeFields(document.fields),eventId:id},'invited');if(event?.endsAt&&new Date(event.endsAt).getTime()<=this.clock())past.push(event);}catch{/* Respect event-specific read permissions. */}}
+      }));
+      return [...existing,...past];
+    }catch{return existing;}
+  }
+  async loadRsvpAppearance(fields,previous) {
+    let theme=null;
+    if(fields.themeURL) {
+      if(previous?.themeUrl===fields.themeURL&&previous?.themeResolved)return {...normalizeRsvpAppearance(fields),...previous,style:normalizeRsvpAppearance(fields).style,customEmoji:normalizeRsvpAppearance(fields).customEmoji,commentsEnabled:fields.isEventChatAllowed!==false};
+      try {
+        const token=await this.firebase();
+        for(const collectionId of ['themesNew','themes']) {
+          const rows=await this.request(`https://firestore.googleapis.com/v1/projects/${this.config.firebaseProjectId}/databases/(default)/documents:runQuery`,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({structuredQuery:{from:[{collectionId}],where:{fieldFilter:{field:{fieldPath:'url'},op:'EQUAL',value:{stringValue:fields.themeURL}}},limit:1}})});
+          const document=Array.isArray(rows)?rows.find(row=>row.document)?.document:null;
+          if(document){theme=decodeFields(document.fields);break;}
+        }
+      }catch{/* The event's own palette remains available without theme-library access. */}
+    }
+    return {...normalizeRsvpAppearance(fields,theme),themeResolved:Boolean(theme)};
   }
   async loadEvent(id) {
     let event = this.requireEvent(id);
@@ -414,8 +503,9 @@ export class DoorlistProvider {
     ]);
     if (details.status === 'fulfilled') {
       const fields = decodeFields(details.value.fields);
+      const appearance=await this.loadRsvpAppearance(fields,event.rsvpAppearance);
       const normalized = normalizeEvent({ ...fields, eventId: id }, event.access);
-      if (normalized) event = { ...event, ...normalized, background:normalizeBackground(fields,event.background)||event.background||null, fontFamily:normalizeEventFont(fields.fontFamily)||event.fontFamily||null, guests:event.guests||[],guestsLoaded:event.guestsLoaded||false, image: normalized.image || event.image, hostPhoto: normalized.hostPhoto || event.hostPhoto, location:normalized.locationAddress?normalized.location:event.location, locationAddress:normalized.locationAddress||event.locationAddress, goingCount:normalized.goingCount??event.goingCount };
+      if (normalized) event = { ...event, ...normalized, rsvpAppearance:appearance, background:normalizeBackground(fields,event.background)||event.background||null, fontFamily:normalizeEventFont(fields.fontFamily)||event.fontFamily||null, guests:event.guests||[],guestsLoaded:event.guestsLoaded||false, image: normalized.image || event.image, hostPhoto: normalized.hostPhoto || event.hostPhoto, location:normalized.locationAddress?normalized.location:event.location, locationAddress:normalized.locationAddress||event.locationAddress, goingCount:normalized.goingCount??event.goingCount };
     }
     if (guest.status === 'fulfilled') {
       const fields = decodeFields(guest.value.fields);
@@ -432,11 +522,14 @@ export class DoorlistProvider {
     this.allowedEvents.set(id, event);
     return event;
   }
-  async setRsvp(id, status) {
+  async setRsvp(id, status, {comment='',submissionId=''}={}) {
     const event=this.requireEvent(id);
-    const nativeStatus={going:'going',maybe:'maybe','not-going':'notGoing'}[status];
+    const nativeStatus=new Map([['going','going'],['maybe','maybe'],['not-going','notGoing']]).get(status);
     if(!nativeStatus)throw new ProviderError('Choose an RSVP response.',400);
     if(!this.profile?.id)throw new ProviderError('Sign in to RSVP.',401);
+    if(typeof comment!=='string'||comment.length>1000)throw new ProviderError('Keep your comment under 1,000 characters.',400);
+    comment=comment.trim();
+    if(comment&&!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(submissionId))throw new ProviderError('Please reopen the RSVP sheet and try again.',400);
     const eventPath=`eventObjects/${encodeURIComponent(id)}`;
     const [eventDoc,guestResult]=await Promise.all([
       this.firestore(eventPath),
@@ -445,7 +538,25 @@ export class DoorlistProvider {
     const fields=decodeFields(eventDoc.fields),guest=decodeFields(guestResult?.fields||{});
     const tiers=Object.values(fields.tieredEventData||{});
     const paidOrTiered=Boolean(fields.isPaidEvent)||tiers.length>1||tiers.some(tier=>Number(tier.tierPrice)>0);
-    if(Number(guest.ticketCount)>0) {
+    const canJoinOpen=fields.joinByLinkRequiresApproval===false&&!paidOrTiered&&['EventVisibility.LINK','EventVisibility.PUBLIC'].includes(fields.visibility);
+    let commentWrite=null,commentAlreadySent=false;
+    if(comment) {
+      if(fields.isEventChatAllowed===false)throw new ProviderError('Comments are turned off for this event.',403);
+      const existing=await this.firestore(`${eventPath}/messages/${submissionId}`).catch(error=>{if(error.status===404||(error.status===403&&Number(guest.ticketCount||0)<=0&&canJoinOpen))return null;throw error;});
+      if(existing){const message=decodeFields(existing.fields);if(message.sender!==this.profile.id||message.message!==comment||message.rsvpStatus!==nativeStatus)throw new ProviderError('Please reopen the RSVP sheet before sending a different comment.',409);commentAlreadySent=true;}
+      if(!commentAlreadySent) {
+        const moderation=await this.api('/api/vtb',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:comment})});
+        if(moderation.allowed!==true)throw new ProviderError('Please remove links from your comment and try again.',422);
+        const messageFields={message:{stringValue:comment},sender:{stringValue:this.profile.id},eventId:{stringValue:id},rsvpStatus:{stringValue:nativeStatus},isDeleted:{booleanValue:false},isAdmin:{booleanValue:false},lastMessageWasThem:{booleanValue:false},reactionsMulti:{mapValue:{fields:{}}}};
+        if(Number.isFinite(Number(fields.approvedIDCount)))messageFields.sizeOfList={integerValue:String(Math.max(0,Math.trunc(Number(fields.approvedIDCount))))};
+        const end=toISO(fields.endTime);if(end)messageFields.eventEndTime={timestampValue:end};
+        commentWrite={update:{name:`${eventDoc.name}/messages/${submissionId}`,fields:messageFields},updateTransforms:[{fieldPath:'createdAt',setToServerValue:'REQUEST_TIME'}],currentDocument:{exists:false}};
+      }
+    }
+    let commentError='';
+    if(commentAlreadySent&&guest.rsvpStatus===nativeStatus) {
+      // The same submitted comment was already committed; a retry must not send it twice.
+    } else if(Number(guest.ticketCount)>0) {
       // Only the authenticated user's admitted guest record is updated. Firestore
       // permissions and both document versions are checked again at commit time.
       const token=await this.firebase();
@@ -456,20 +567,25 @@ export class DoorlistProvider {
           {verify:eventDoc.name,currentDocument:{updateTime:eventDoc.updateTime}},
           {update:{name:guestResult.name,fields:{rsvpStatus:{stringValue:nativeStatus},uuid:{stringValue:this.profile.id},eventID:{stringValue:id}}},
             updateMask:{fieldPaths:names},updateTransforms:[{fieldPath:'rsvpTime',setToServerValue:'REQUEST_TIME'}],currentDocument:{updateTime:guestResult.updateTime}},
+          ...(commentWrite?[commentWrite]:[]),
         ]}),
       });
-    } else if(fields.joinByLinkRequiresApproval===false&&!paidOrTiered&&['EventVisibility.LINK','EventVisibility.PUBLIC'].includes(fields.visibility)) {
+    } else if(canJoinOpen) {
       await this.rsvpOpenEvent(event,nativeStatus);
+      if(commentWrite) {
+        try {const token=await this.firebase();await this.request(`https://firestore.googleapis.com/v1/projects/${this.config.firebaseProjectId}/databases/(default)/documents:commit`,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({writes:[commentWrite]})});}
+        catch {commentError='Your RSVP is saved, but your comment could not be sent. Try sending the comment again.';}
+      }
     } else {
       throw new ProviderError('Open this event in Doorlist to request access or get a ticket before RSVPing.',403,'doorlist_rsvp_access_required');
     }
     // A successful upstream write is required before changing any local status.
-    const previous=event.rsvp;
+    const previous=guest.rsvpStatus?normalizeStatus(guest.rsvpStatus):event.rsvp;
     const next={...event,rsvp:status,hasAdmission:true};
     if(Number.isInteger(event.goingCount)&&previous!==status)next.goingCount=Math.max(0,event.goingCount+(status==='going'?1:0)-(previous==='going'?1:0));
     next.guests=(event.guests||[]).map(person=>person.id===this.profile.id?{...person,status,attendanceVerified:true}:person);
     this.allowedEvents.set(id,next);
-    return {event:next};
+    return {event:next,commentSent:Boolean(comment)&&!commentError,commentError};
   }
   async rsvpOpenEvent(event,nativeStatus) {
     // Resolve the action identifier from Doorlist's current published client,

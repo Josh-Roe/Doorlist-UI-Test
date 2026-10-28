@@ -125,12 +125,13 @@ export async function handleDoorlist(request:Request,env:Runtime) {
     if(!session?.provider.profile)throw new ProviderError('Sign in to connect your Doorlist events.',401);
     const p=session.provider;
     const sessionHeaders={'Set-Cookie':cookie(session.raw,url.protocol==='https:')};
+    if(request.method==='GET'&&url.pathname==='/api/profile'){const result=await p.loadProfile();await saveSession(session,env);return reply(result,200,sessionHeaders);}
     if(request.method==='GET'&&url.pathname==='/api/profiles')return reply({profiles:p.listProfiles(),scope:'signed-in-account'});
     if(request.method==='GET'&&url.pathname==='/api/events') {
       const result=await p.syncEvents();await saveSession(session,env);return reply(result,200,sessionHeaders);
     }
     const rsvp=/^\/api\/events\/([\w-]{5,100})\/rsvp$/.exec(url.pathname);
-    if(request.method==='POST'&&rsvp){const data=await readBody(request);const result=await p.setRsvp(rsvp[1],data.status);await saveSession(session,env);return reply(result,200,sessionHeaders);}
+    if(request.method==='POST'&&rsvp){const data=await readBody(request);const result=await p.setRsvp(rsvp[1],data.status,{comment:data.comment,submissionId:data.submissionId});await saveSession(session,env);return reply(result,200,sessionHeaders);}
     const match=/^\/api\/events\/([\w-]{5,100})(?:\/(guests|invite))?$/.exec(url.pathname);
     if(request.method==='GET'&&match) {
       const result=match[2]==='guests'?await p.loadGuests(match[1],{cursor:url.searchParams.get('cursor')||'',pageLimit:5,enrichPhotos:true}):match[2]==='invite'?await p.loadInvite(match[1]):{event:await p.loadEvent(match[1])};

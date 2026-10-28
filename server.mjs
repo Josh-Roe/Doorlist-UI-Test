@@ -85,10 +85,11 @@ export function createDoorlistServer({ providerFactory = () => new DoorlistProvi
           res.setHeader('Set-Cookie', 'doorlist_session=; Max-Age=0; HttpOnly; SameSite=Strict; Path=/');
           return json(res, 200, { disconnected: true });
         }
+        if(req.method==='GET'&&url.pathname==='/api/profile')return json(res,200,await needSession(req).provider.loadProfile());
         if(req.method==='GET'&&url.pathname==='/api/profiles')return json(res,200,{profiles:needSession(req).provider.listProfiles(),scope:'signed-in-account'});
         if (req.method === 'GET' && url.pathname === '/api/events') return json(res, 200, await needSession(req).provider.syncEvents());
         const rsvp=/^\/api\/events\/([\w-]{5,100})\/rsvp$/.exec(url.pathname);
-        if(req.method==='POST'&&rsvp){const session=needSession(req);const data=await body(req);return json(res,200,await session.provider.setRsvp(rsvp[1],data.status));}
+        if(req.method==='POST'&&rsvp){const session=needSession(req);const data=await body(req);return json(res,200,await session.provider.setRsvp(rsvp[1],data.status,{comment:data.comment,submissionId:data.submissionId}));}
         const match = /^\/api\/events\/([\w-]{5,100})(?:\/(guests|invite))?$/.exec(url.pathname);
         if (req.method === 'GET' && match) {
           const provider = needSession(req).provider;

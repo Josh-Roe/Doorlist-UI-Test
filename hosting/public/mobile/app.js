@@ -10,6 +10,9 @@ const dialog = document.getElementById('actionDialog');
 const toast = document.getElementById('toast');
 const pageNavigation=createPageNavigation({app,invite,onActivate:content=>{app=content;},onActivity:updateConfettiPlayback,onSettled:()=>{if(pendingDataRender)renderDataUpdate();scheduleBackPage();},getMeta:()=>({revision:screenRevision,guestFilter,guestQuery,guestVisibleCount,guestBatchError}),getBackTarget:backTarget,onBack:goBack});
 const icons = {
+  profileQr: '<path d="M8 3H4a1 1 0 0 0-1 1v4m13-5h4a1 1 0 0 1 1 1v4M3 16v4a1 1 0 0 0 1 1h4m13-5v4a1 1 0 0 1-1 1h-4"/><circle cx="12" cy="9" r="2.5"/><path d="M7 18v-1a5 5 0 0 1 10 0v1Z"/>',
+  menu: '<path d="M4 5h16M4 12h16M4 19h16"/>',
+  message: '<path d="M21 11.5a9 9 0 0 1-9 9 11 11 0 0 1-4-.8L2 22l2-6a9 9 0 1 1 17-4.5Z"/>',
   back: '<path d="m14 5-7 7 7 7"/>',
   next: '<path d="m9 5 7 7-7 7"/>',
   search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/>',
@@ -90,6 +93,7 @@ document.addEventListener('error', event => {
     if(replacement){image.dataset.avatarId=replacement.id;image.dataset.avatarName=replacement.name;image.src=replacement.photo;return;}
     image.hidden=true;return;
   }
+  if(image.closest('.notification-feed')){image.hidden=true;return;}
   image.dataset.fallbackApplied='true';
   image.src=avatarFallback(image.dataset.avatarId,image.dataset.avatarName);
 },true);
@@ -202,7 +206,7 @@ function eventPage(event) {
     <section class="event-info"><div class="info-line"><span class="info-icon">${icon('calendar')}</span><div><span>Date</span><strong>${date.full}</strong><p>${date.time} – ${date.endTime}</p></div></div><div class="info-line">${hostAvatar(event)}<div><span>Hosted by</span><strong>${esc(event.host)}</strong></div></div><div class="info-line"><span class="info-icon">${icon('pin')}</span><div><span>Location</span><strong>${esc(event.location)}</strong>${event.locationAddress?`<a class="location-link" href="https://maps.apple.com/?q=${encodeURIComponent(event.locationAddress)}" target="_blank" rel="noopener noreferrer">${esc(event.locationAddress)}</a>`:''}</div></div></section>
     <section class="about-event"><h2>About this event</h2><p>${esc(event.description)}</p></section>
     ${sharedPlaylistSection(event)}
-    <nav class="event-dock" aria-label="Event actions"><button data-action="rsvp" data-id="${event.id}"><span class="event-dock-button">${event.rsvp==='going'?icon('thumb'):event.rsvp==='maybe'?'🤔':event.rsvp==='not-going'?'👎':'🔥'}</span><span>RSVP</span></button><button class="share-action" data-action="share" data-id="${event.id}"><span class="event-dock-button">${icon('share')}</span><span>Share</span></button><a href="#/event/${event.id}/invite"><span class="event-dock-button">${icon('qr')}</span><span>Tickets</span></a></nav></div>`;
+    <nav class="event-dock" aria-label="Event actions"><button data-action="rsvp" data-id="${event.id}"><span class="event-dock-button">${event.rsvp==='going'?eventRsvpEmojis(event)[0]:event.rsvp==='maybe'?eventRsvpEmojis(event)[1]:event.rsvp==='not-going'?eventRsvpEmojis(event)[2]:'🔥'}</span><span>RSVP</span></button><button class="share-action" data-action="share" data-id="${event.id}"><span class="event-dock-button">${icon('share')}</span><span>Share</span></button><a href="#/event/${event.id}/invite"><span class="event-dock-button">${icon('qr')}</span><span>Tickets</span></a></nav></div>`;
 }
 function sharedPlaylistSection(event) {
   return `<section class="shared-playlist"><h2>${icon('spotify')}Shared Playlist</h2><div class="playlist-actions"><button data-action="playlist-add" data-id="${event.id}">${icon('plus')}Add a Song</button>${event.playlist?.url?`<a href="${esc(event.playlist.url)}" target="_blank" rel="noopener noreferrer">${icon('arrowUpRight')}Open Playlist</a>`:`<button disabled>${icon('arrowUpRight')}Open Playlist</button>`}</div></section>`;
@@ -266,7 +270,7 @@ let activityTab='friends';
 const activityScroll={friends:0,you:0};
 function activityRows() {
   const profile=eventStore.getProfile();
-  return createNotificationPreview({profiles:eventStore.mode==='preview'?eventStore.getSuggestedFriends():eventStore.getProfiles(),events:eventStore.listEvents(),selfId:profile.id,seed:notificationPreviewSeed()});
+  return createNotificationPreview({profiles:eventStore.getProfiles().filter(person=>!unavailablePhotos.has(person.photo)),events:eventStore.listEvents(),selfId:profile.id,seed:notificationPreviewSeed()});
 }
 function activityFeed(rows,tab=activityTab) {
   if(!rows.length)return empty('All caught up','Activity will appear here once your profiles are loaded.','bell');
@@ -290,11 +294,37 @@ function activityFeed(rows,tab=activityTab) {
 }
 function notificationsPage() {
   const rows=activityRows();
-  return `<div class="activity-view"><header class="notifications-header"><div class="activity-heading"><h1>Activity</h1><span class="notification-preview-label" title="Generated activity using your cached profiles">Preview</span></div><button class="glass-button activity-add-friends" data-action="add-friends" aria-label="Add friends">${icon('userPlus')}</button></header><div class="activity-segments" role="tablist" aria-label="Activity"><button role="tab" id="activityFriendsTab" aria-controls="activityFriendsFeed" aria-selected="${activityTab==='friends'}" data-action="activity-tab" data-tab="friends">Friends</button><button role="tab" id="activityYouTab" aria-controls="activityYouFeed" aria-selected="${activityTab==='you'}" data-action="activity-tab" data-tab="you">You</button></div><section id="activityFeed" class="notification-feed" aria-label="Generated activity preview"><div id="activityFriendsFeed" role="tabpanel" aria-labelledby="activityFriendsTab" ${activityTab==='friends'?'':'hidden'}>${activityFeed(rows,'friends')}</div><div id="activityYouFeed" role="tabpanel" aria-labelledby="activityYouTab" ${activityTab==='you'?'':'hidden'}>${activityFeed(rows,'you')}</div></section>${nav('bell')}</div>`;
+  return `<div class="activity-view"><header class="notifications-header"><div class="activity-heading"><h1>Activity</h1></div><button class="glass-button activity-add-friends" data-action="add-friends" aria-label="Add friends">${icon('userPlus')}</button></header><div class="activity-segments" role="tablist" aria-label="Activity"><button role="tab" id="activityFriendsTab" aria-controls="activityFriendsFeed" aria-selected="${activityTab==='friends'}" data-action="activity-tab" data-tab="friends">Friends</button><button role="tab" id="activityYouTab" aria-controls="activityYouFeed" aria-selected="${activityTab==='you'}" data-action="activity-tab" data-tab="you">You</button></div><section id="activityFeed" class="notification-feed" aria-label="Generated activity preview"><div id="activityFriendsFeed" role="tabpanel" aria-labelledby="activityFriendsTab" ${activityTab==='friends'?'':'hidden'}>${activityFeed(rows,'friends')}</div><div id="activityYouFeed" role="tabpanel" aria-labelledby="activityYouTab" ${activityTab==='you'?'':'hidden'}>${activityFeed(rows,'you')}</div></section>${nav('bell')}</div>`;
+}
+const profileGroupTemplates=[{"name":"Roommates","description":"Keep track of house events and split expenses","photo":"https://firebasestorage.googleapis.com/v0/b/doorlist-b6a3f.appspot.com/o/orgCovers%2Fpreset_school_roommates_college_dorm_flatmates_apartment_house.jpg?alt=media&token=9c37811e-6415-41bc-8eca-2b93c0b9aadf"},{"name":"Club","description":"Weekly meetups and tournament planning","photo":"https://firebasestorage.googleapis.com/v0/b/doorlist-b6a3f.appspot.com/o/orgCovers%2Fpreset_club_business_work.jpg?alt=media&token=7ac6739e-e405-4efb-a715-48a5517d078a"},{"name":"Friend Group","description":"Plan weekend activities with friends","photo":"https://firebasestorage.googleapis.com/v0/b/doorlist-b6a3f.appspot.com/o/orgCovers%2Fpreset_school_friends.jpg?alt=media&token=c29c7e3b-ee99-4ae7-a8d8-51d64aaaa4b4"}];
+let profileTab='friends',profilePending=false,profileError='';
+function profilePanel(profile,tab) {
+  if(tab==='friends')return `<h2>Friends</h2>${(profile.friends||[]).map(person=>`<a class="profile-person-row" href="${esc(person.url||'https://doorlist.app')}" target="_blank" rel="noopener noreferrer">${avatar(person)}<strong>${esc(person.name)}</strong></a>`).join('')||`<p class="profile-empty">${profileError?esc(profileError):profile.friendCount===0?'No friends yet.':'Your friends will appear here.'}</p>`}`;
+  if(tab==='groups')return `<div class="profile-group-actions"><button data-action="profile-create-group">Create Group<span>${icon('plus')}</span></button><button data-action="profile-join-group">Join Group<span>${icon('next')}</span></button></div>${(profile.groups||[]).length?`<h2>Groups</h2>${profile.groups.map(group=>`<button class="profile-person-row" data-action="profile-group" data-id="${esc(group.id)}">${avatar(group)}<strong>${esc(group.name)}</strong></button>`).join('')}`:''}<h2>Suggested</h2>${profileGroupTemplates.map(template=>`<div class="profile-group-suggestion"><img src="${esc(template.photo)}" alt=""><span><strong>${esc(template.name)}</strong><small>${esc(template.description)}</small></span><button data-action="profile-create-group">Create</button></div>`).join('')}`;
+  const events=(profile.events||eventStore.listEvents().filter(event=>event.access==='invited')).slice().sort((a,b)=>(a.startsAt||'').localeCompare(b.startsAt||'')),past=events.filter(event=>event.endsAt&&new Date(event.endsAt)<new Date()),upcoming=events.filter(event=>!past.includes(event));
+  let group='';
+  const row=event=>`<a class="profile-event-row" href="#/event/${event.id}"><span class="profile-event-art">${poster(event)}</span><span class="profile-event-copy"><small>${event.hostPhoto?hostAvatar(event):''}${esc(event.host)}</small><strong>${esc(event.title)}</strong><span class="profile-event-time">${dateParts(event).full} ${dateParts(event).time} | ${esc(event.location)}</span></span></a>`;
+  return upcoming.map(event=>{const date=dateParts(event).full,heading=group===date?'':`<h2 class="profile-event-day">${date}</h2>`;group=date;return heading+row(event);}).join('')+(past.length?`<h2 class="profile-event-day past-events-heading">Past Events</h2>${past.reverse().map(row).join('')}`:'')||'<p class="profile-empty">Your events will appear here.</p>';
+
 }
 function profilePage() {
-  const profile = eventStore.getProfile();
-  return `<div class="profile-view">${topbar('/','Your profile')}<img class="profile-main-photo" src="${esc(profile.photo)}" alt="Your profile photo"><h1>${esc(profile.name)}</h1><p class="muted">Your social calendar, all in one place.</p><div class="profile-stats"><div><strong>${eventStore.listEvents().length}</strong><span>Events</span></div><div><strong>${eventStore.listEvents().filter(event=>event.rsvp==='going').length}</strong><span>Going</span></div></div><a class="settings-link" href="#/events">${icon('calendar')}Your events${icon('next')}</a><button class="settings-link" data-action="settings">${icon('user')}Edit profile & invite${icon('next')}</button><button class="settings-link" data-action="connect">${icon('people')}${eventStore.authenticated ? 'Doorlist connection' : 'Connect Doorlist'}${icon('next')}</button>${nav('user')}</div>`;
+  const profile=eventStore.getProfile(),count=value=>Number.isInteger(value)?value:'—';
+  const photo=/^https:\/\//.test(profile.photo||'')?profile.photo:avatarFallback(profile.id,profile.name);
+  const school=/^[A-Z0-9]{2,12}$/.test(profile.school||'')&&profile.school!=='NONE'?profile.school:null;
+  return `<div class="profile-view native-profile-view"><header class="profile-toolbar"><button class="glass-button" data-action="profile-qr" aria-label="Your profile QR code">${icon('profileQr')}</button><div class="profile-toolbar-pill"><button data-action="profile-messages" aria-label="Messages">${icon('message')}</button><button data-action="profile-menu" aria-label="Profile menu">${icon('menu')}</button></div></header><section class="profile-identity"><div class="profile-portrait">${avatar({id:profile.id,name:profile.name,photo},'profile-main-photo')}${school?`<span class="profile-school-badge"><img src="https://doorlist.app/schoolIcons/${encodeURIComponent(school)}.svg" alt="${esc(school)}"></span>`:''}</div><h1>${esc(profile.name)}</h1>${profile.bio?`<p class="profile-bio">${esc(profile.bio)}</p>`:''}</section><div class="profile-actions"><button class="profile-add-button" data-action="add-friends">Add Friends</button><button data-action="profile-calendar">Calendar</button><button class="profile-share-button" data-action="profile-share" aria-label="Share your profile">${icon('share')}</button></div><div class="profile-tabs" role="tablist" aria-label="Profile"><button role="tab" aria-selected="${profileTab==='friends'}" data-action="profile-tab" data-tab="friends">${count(profile.friendCount)} Friends</button><button role="tab" aria-selected="${profileTab==='groups'}" data-action="profile-tab" data-tab="groups">${count(profile.groupCount)} Groups</button><button role="tab" aria-selected="${profileTab==='events'}" data-action="profile-tab" data-tab="events">${count(profile.eventCount)} Events</button></div><section class="profile-list" id="profileList">${profilePanel(profile,profileTab)}</section>${nav('user')}</div>`;
+}
+async function hydrateProfile() {
+  const profile=eventStore.getProfile();
+  if(!eventStore.authenticated||profilePending||(profile.detailsVersion===2&&profile.detailsUpdatedAt&&Date.now()-profile.detailsUpdatedAt<300000))return;
+  profilePending=true;profileError='';
+  try{await eventStore.loadProfile();}catch(error){profileError=error.message;}finally{profilePending=false;}
+}
+async function shareProfile(){
+  let profile=eventStore.getProfile();
+  if(!profile.shareUrl){try{await eventStore.loadProfile();profile=eventStore.getProfile();}catch(error){notify(error.message);return;}}
+  if(!profile.shareUrl){notify('Sign in to share your Doorlist profile.');return;}
+  if(navigator.share){try{await navigator.share({title:profile.name,url:profile.shareUrl});return;}catch(error){if(error.name==='AbortError')return;}}
+  try{await navigator.clipboard.writeText(profile.shareUrl);notify('Profile link copied');}catch{sheet('Your profile link',`<input class="auth-input" value="${esc(profile.shareUrl)}" readonly>`);}
 }
 const savedScroll = new Map();
 let pendingDataRender=false;
@@ -420,6 +450,7 @@ function render({background=false}={}) {
   if(parts[2]==='guests')queueMicrotask(bindGuestScroll);
   if(!qr&&parts.length===0&&activeHeroId){const rail=app.querySelector('.coming-up-rail');const card=rail?.querySelector(`a[href="#/event/${activeHeroId}"]`);if(card)rail.scrollLeft=card.offsetLeft-rail.offsetLeft;}
   if (event?.source === 'doorlist' && !qr) hydrateEventRoute(event, parts[2] === 'guests');
+  if(parts[0]==='profile')queueMicrotask(hydrateProfile);
   if(!qr)pageNavigation.didRender(route);
   pageNavigation.syncVisibility();scheduleBackPage();
 }
@@ -429,13 +460,26 @@ function dismissDialog() {
   dialog.animate([{transform:'translateY(0)'},{transform:'translateY(100%)'}],{duration:240,easing:'cubic-bezier(.4,0,1,1)'}).finished.then(()=>dialog.close()).catch(()=>dialog.close());
 }
 function sheet(title, content) {
+  dialog.classList.remove('rsvp-themed-sheet');dialog.removeAttribute('style');
   dialog.innerHTML = `<div class="dialog-handle"></div><header><h2 id="actionTitle">${esc(title)}</h2><button class="dialog-close" data-action="close-dialog" aria-label="Close">${icon('close')}</button></header>${content}`;
   dialog.showModal();
 }
+const rsvpEmojiSets={Default:['👍','🤔','👎'],Hearts:['❤️','❤️‍🩹','💔'],Nature:['🌸','🌱','🥀'],Monkeys:['🐵','🙉','🙈'],Drink:['🍻','🍺','🫙'],Food:['🍻','🍺','🫙'],Moon:['🌝','🌗','🌚']};
+function eventRsvpEmojis(event){
+  const appearance=event.rsvpAppearance||{};
+  if(appearance.customEmoji&&Intl.Segmenter){const emojis=[...new Intl.Segmenter().segment(appearance.customEmoji)].map(part=>part.segment);if(emojis.length===3)return emojis;}
+  return rsvpEmojiSets[appearance.style]||rsvpEmojiSets.Default;
+}
 function rsvpSheet(id) {
   const event=eventStore.getEvent(id);if(!event)return;
-  const selected=['going','maybe','not-going'].includes(event.rsvp)?event.rsvp:'going';
-  sheet('RSVP',`<p class="rsvp-event-name">${esc(event.title)}</p><div class="native-rsvp-options">${[['going',icon('thumb'),"I'm in"],['maybe','🤔','Maybe'],['not-going','👎',"Can't go"]].map(([status,emoji,label])=>`<button data-action="select-rsvp" data-id="${id}" data-status="${status}" aria-pressed="${selected===status}"><span class="rsvp-orb rsvp-${status}">${emoji}</span><strong>${label}</strong></button>`).join('')}</div><p id="rsvpError" class="auth-error" role="alert"></p><button class="primary-button rsvp-confirm" data-action="set-rsvp" data-id="${id}" data-status="${selected}">Done</button>`);
+  const selected=['going','maybe','not-going'].includes(event.rsvp)?event.rsvp:'going',appearance=event.rsvpAppearance||{},emojis=eventRsvpEmojis(event);
+  sheet('RSVP',`<div class="native-rsvp-options">${[['going',emojis[0],"I'm in"],['maybe',emojis[1],'Maybe'],['not-going',emojis[2],"Can't go"]].map(([status,emoji,label])=>`<button data-action="select-rsvp" data-id="${id}" data-status="${status}" aria-pressed="${selected===status}"><span class="rsvp-orb rsvp-${status}">${emoji}</span><strong>${label}</strong></button>`).join('')}</div>${appearance.commentsEnabled!==false?`<label class="rsvp-comment-label" for="rsvpComment">Comment (optional)</label><p class="rsvp-comment-help">Add a message with your RSVP</p><input id="rsvpComment" class="rsvp-comment-input" maxlength="1000" placeholder="I'm so excited!" autocomplete="off">`:''}<p id="rsvpError" class="auth-error" role="alert"></p><button class="primary-button rsvp-confirm" data-action="set-rsvp" data-id="${id}" data-status="${selected}">Done</button>`);
+  dialog.classList.add('rsvp-themed-sheet');
+  const color=value=>typeof value==='string'&&/^#(?:[a-f0-9]{3}|[a-f0-9]{6}|[a-f0-9]{8})$/i.test(value)?value:null;
+  const colors=(appearance.gradientColors||[]).map(color).filter(Boolean);
+  const background=colors.at(-1)||color(appearance.background)||color(appearance.accent)||'#292732';
+  dialog.style.setProperty('--rsvp-background',background);
+  dialog.style.setProperty('--rsvp-selection',colors.length?`linear-gradient(135deg,${colors.join(',')}${colors.length===1?','+colors[0]:''})`:color(appearance.accent)||background);
 }
 async function shareEvent(id) {
   const event=eventStore.getEvent(id);if(!event)return;
@@ -471,6 +515,19 @@ document.addEventListener('click', async event => {
     const person=eventStore.getSuggestedFriends().find(item=>item.id===id);
     sheet(person?.name || 'Add friends',`<p class="dialog-description">Find your people and manage friend requests in Doorlist.</p><a class="primary-button" href="https://doorlist.app" target="_blank" rel="noopener noreferrer">Open Doorlist ${icon('next')}</a>`);
   }
+  if(action==='profile-tab'){
+    profileTab=button.dataset.tab;app.querySelectorAll('[data-action="profile-tab"]').forEach(tab=>tab.setAttribute('aria-selected',String(tab===button)));
+    app.querySelector('#profileList').innerHTML=profilePanel(eventStore.getProfile(),profileTab);
+  }
+  if(action==='profile-share'){await shareProfile();return;}
+  if(action==='profile-qr'){
+    try{if(!eventStore.getProfile().shareQr)await eventStore.loadProfile();const profile=eventStore.getProfile();if(!profile.shareQr){notify('Sign in to open your profile QR code.');return;}sheet(profile.name,`<div class="profile-qr-code">${profile.shareQr}</div><button class="primary-button" data-action="profile-share">Share profile</button>`);}catch(error){notify(error.message);}
+  }
+  if(action==='profile-menu')sheet('Settings',`<button class="dialog-link" data-action="connect">${icon('user')}Doorlist account${icon('next')}</button><button class="dialog-link" data-action="profile-edit">${icon('user')}Edit profile${icon('next')}</button><button class="dialog-link" data-action="disconnect">Sign out</button>`);
+  if(action==='profile-edit'||action==='profile-messages')sheet(action==='profile-edit'?'Edit profile':'Messages',`<a class="primary-button" href="https://doorlist.app" target="_blank" rel="noopener noreferrer">Open Doorlist</a>`);
+  if(action==='profile-create-group'||action==='profile-join-group')sheet(action==='profile-create-group'?'Create Group':'Join Group','<a class="primary-button" href="https://doorlist.app" target="_blank" rel="noopener noreferrer">Open Doorlist</a>');
+  if(action==='profile-group'){const group=eventStore.getProfile().groups?.find(group=>group.id===id);sheet(group?.name||'Group','<a class="primary-button" href="https://doorlist.app" target="_blank" rel="noopener noreferrer">Open in Doorlist</a>');}
+  if(action==='profile-calendar')sheet('Calendar',`<div class="profile-calendar-events">${eventStore.listEvents().map(eventRow).join('')||'<p class="dialog-description">No upcoming events.</p>'}</div>`);
   if(action==='activity-tab'){
     if(activityTab===button.dataset.tab)return;
     activityScroll[activityTab]=pageNavigation.scroller.scrollTop;activityTab=button.dataset.tab;
@@ -484,14 +541,21 @@ document.addEventListener('click', async event => {
     sheet(button.dataset.kind==='friend'?'Friend preview':'Friend request',`<p class="dialog-description">${esc(button.dataset.name)}</p><p class="dialog-note">Generated activity preview using a cached profile.</p>${button.dataset.kind==='friend'?'':`<button class="primary-button" data-action="preview-accept-request">Accept</button>`}<button class="text-action" data-action="close-dialog">Close</button>`);
   }
   if(action==='preview-accept-request'){dialog.close();notify('Preview request accepted');}
-  if (action==='rsvp') rsvpSheet(id);
+  if(action==='rsvp'){
+    const event=eventStore.getEvent(id);if(event?.source==='doorlist'&&(!event.detailsLoaded||event.detailsStale)){button.disabled=true;try{await eventStore.loadEvent(id);}catch(error){notify(error.message);}finally{button.disabled=false;}}
+    rsvpSheet(id);
+  }
   if(action==='select-rsvp'){
     dialog.querySelectorAll('[data-action="select-rsvp"]').forEach(option=>option.setAttribute('aria-pressed',String(option===button)));
-    dialog.querySelector('[data-action="set-rsvp"]').dataset.status=button.dataset.status;
+    dialog.querySelector('[data-action="set-rsvp"]').dataset.status=button.dataset.status;const input=dialog.querySelector('#rsvpComment');if(input)input.placeholder=button.dataset.status==='going'?"I'm so excited!":button.dataset.status==='maybe'?"I'll try to make it!":"Sorry I can't make it!";
   }
   if(action==='set-rsvp') {
     button.disabled=true;button.textContent='Saving…';
-    try{await eventStore.setRsvp(id,button.dataset.status);dialog.close();renderDataUpdate();notify(`RSVP saved: ${statusLabel(button.dataset.status)}`);}
+    try{const comment=dialog.querySelector('#rsvpComment')?.value.trim()||'',fingerprint=JSON.stringify([button.dataset.status,comment]);
+      if(button.dataset.submissionFingerprint!==fingerprint){button.dataset.submissionId=crypto.randomUUID();button.dataset.submissionFingerprint=fingerprint;}
+      const result=await eventStore.setRsvp(id,button.dataset.status,{comment,submissionId:button.dataset.submissionId});
+      if(result?.commentError){dialog.querySelector('#rsvpError').textContent=result.commentError;button.disabled=false;button.textContent='Retry comment';return;}
+      dialog.close();renderDataUpdate();notify(comment?'RSVP and comment saved':`RSVP saved: ${statusLabel(button.dataset.status)}`);}
     catch(error){const message=dialog.querySelector('#rsvpError');message.textContent=error.message;button.disabled=false;button.textContent='Try again';
       if([403,409,503].includes(error.status)&&!dialog.querySelector('.rsvp-open-official')){const link=document.createElement('a');link.className='dialog-link rsvp-open-official';link.href=eventStore.getEvent(id).sourceUrl;link.target='_blank';link.rel='noopener noreferrer';link.textContent='Open event in Doorlist';message.after(link);}}
   }
@@ -510,7 +574,9 @@ document.addEventListener('click', async event => {
   if (action==='copy-link') { try { await navigator.clipboard.writeText(eventStore.getEvent(id).sourceUrl || `${location.href.split('#')[0]}#/event/${id}`); dialog.close(); notify('Event link copied'); } catch { notify('Link could not be copied. Use your browser’s address bar.'); } }
   if (action==='request-plus-one') { eventStore.requestPlusOne(id); dialog.close(); notify('+1 request saved in preview'); }
 });
+document.addEventListener('keydown',event=>{if(event.target.id==='rsvpComment'&&event.key==='Enter'){event.preventDefault();dialog.querySelector('[data-action="set-rsvp"]')?.click();}});
 document.addEventListener('input', event => {
+  if(event.target.id==='rsvpComment'){const button=dialog.querySelector('[data-action="set-rsvp"]');if(button&&!button.disabled)button.textContent=event.target.value.trim()?'Send':'Done';}
   if (event.target.id==='guestSearch') {
     guestQuery = event.target.value;
     guestVisibleCount = GUEST_BATCH_SIZE;

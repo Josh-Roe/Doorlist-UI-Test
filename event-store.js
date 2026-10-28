@@ -8,10 +8,11 @@ export function createEventStore({fetchImpl=(...args)=>fetch(...args),storage=br
   let events=[],suggestedFriends=[],profiles=[],profile=blankProfile();
   let authenticated=false,mode='disconnected',status='loading',error='',coverage=null,syncedAt=null;
   let refreshing=null,epoch=0;
+  const eventLoads=new Map();
   const listeners=new Set();
   const emit=()=>listeners.forEach(fn=>fn());
   const removeCache=()=>{try{storage?.removeItem(CACHE_KEY);}catch{}};
-  const reset=()=>{epoch++;refreshing=null;events=[];suggestedFriends=[];profiles=[];profile=blankProfile();authenticated=false;mode='disconnected';status='ready';error='';coverage=null;syncedAt=null;removeCache();};
+  const reset=()=>{epoch++;refreshing=null;eventLoads.clear();events=[];suggestedFriends=[];profiles=[];profile=blankProfile();authenticated=false;mode='disconnected';status='ready';error='';coverage=null;syncedAt=null;removeCache();};
   const persist=()=>{
     if(!authenticated||!profile.id)return;
     try{storage?.setItem(CACHE_KEY,JSON.stringify({version:1,accountId:profile.id,savedAt:clock(),events,suggestedFriends,profiles,profile,coverage,syncedAt}));}catch{/* Storage full/disabled must not block the app. */}
@@ -52,7 +53,7 @@ export function createEventStore({fetchImpl=(...args)=>fetch(...args),storage=br
     get mode(){return mode;},get authenticated(){return authenticated;},get status(){return status;},get error(){return error;},get coverage(){return coverage;},get syncedAt(){return syncedAt;},get refreshing(){return Boolean(refreshing);},
     subscribe(fn){listeners.add(fn);return()=>listeners.delete(fn);},
     listEvents:()=>structuredClone(deduplicateEvents(mode==='preview'?demoStore.listEvents():events)),
-    getEvent:id=>mode==='preview'?demoStore.getEvent(id):structuredClone(events.find(event=>event.id===id)||null),
+    getEvent:id=>mode==='preview'?demoStore.getEvent(id):structuredClone(events.find(event=>event.id===id)||profile.events?.find(event=>event.id===id)||null),
     getSuggestedFriends:()=>mode==='preview'?demoStore.getGuests('house-night').slice(0,6):structuredClone(suggestedFriends),
     getProfiles:()=>structuredClone(profiles),
     getProfile:()=>mode==='preview'?demoStore.getProfile():{...profile},
@@ -95,14 +96,20 @@ export function createEventStore({fetchImpl=(...args)=>fetch(...args),storage=br
     usePreview(){reset();mode='preview';status='ready';},
     async loadEvent(id){
       if(mode!=='live'||!authenticated)return this.getEvent(id);
-      const generation=epoch,{event}=await request(`/api/events/${encodeURIComponent(id)}`);
-      if(generation!==epoch)return null;
-      const index=events.findIndex(item=>item.id===id);
-      if(index>=0)events[index]={...events[index],...event,guests:events[index].guests||[],guestsLoaded:events[index].guestsLoaded||false,detailsStale:false};
-      persist();return this.getEvent(id);
+      if(eventLoads.has(id))return eventLoads.get(id);
+      const generation=epoch;
+      const pending=(async()=>{
+        const {event}=await request(`/api/events/${encodeURIComponent(id)}`);
+        if(generation!==epoch)return null;
+        const index=events.findIndex(item=>item.id===id);
+        if(index>=0)events[index]={...events[index],...event,guests:events[index].guests||[],guestsLoaded:events[index].guestsLoaded||false,detailsStale:false};else{const existing=profile.events?.find(item=>item.id===id);if(existing)Object.assign(existing,event,{detailsStale:false});}
+        persist();return this.getEvent(id);
+      })();
+      eventLoads.set(id,pending);
+      try{return await pending;}finally{if(eventLoads.get(id)===pending)eventLoads.delete(id);}
     },
     async loadGuests(id,{append=false}={}){
-      const existing=events.find(item=>item.id===id),cursor=append?existing?.guestListNextCursor:null,generation=epoch;
+      const existing=events.find(item=>item.id===id)||profile.events?.find(item=>item.id===id),cursor=append?existing?.guestListNextCursor:null,generation=epoch;
       if(mode!=='live'||!authenticated)return {guests:existing?.guests||[]};
       if(append&&!cursor)return {guests:existing?.guests||[],generated:false};
       let result;
@@ -121,15 +128,22 @@ export function createEventStore({fetchImpl=(...args)=>fetch(...args),storage=br
       profiles=[...new Map([...profiles,...guests.filter(person=>/^https:\/\//.test(person.photo||''))].map(person=>[person.id,{id:person.id,name:person.name,photo:person.photo}])).values()].slice(-500);
       const photos=new Map(profiles.map(person=>[person.id.toLowerCase(),person.photo]));
       guests.forEach(person=>{if(!person.photo)person.photo=photos.get(person.id.toLowerCase())||'';});
-      const event=events.find(item=>item.id===id);
+      const event=events.find(item=>item.id===id)||profile.events?.find(item=>item.id===id);
       if(event)Object.assign(event,{guests,guestsLoaded:true,guestListStale:false,guestListRestricted:result.restricted,guestListPartial:result.partial,guestListGenerated:source==='profile-cache',guestListSource:source,guestListNextCursor:result.nextPageToken||null});
       persist();return {...result,guests,generated:source==='profile-cache',source};
     },
+    async loadProfile(){
+      if(!authenticated||mode!=='live')return this.getProfile();
+      const generation=epoch;
+      const result=await request('/api/profile');if(generation!==epoch)return;
+      if(result.profile?.id!==profile.id)throw new Error('Your profile could not be loaded.');
+      profile=result.profile;profiles=result.profiles||profiles;persist();emit();return profile;
+    },
     loadInvite:id=>request(`/api/events/${encodeURIComponent(id)}/invite`),
-    async setRsvp(id,value){
+    async setRsvp(id,value,options={}){
       if(mode==='preview'){const result=demoStore.setRsvp(id,value);emit();return result;}
       const generation=epoch;
-      const result=await request(`/api/events/${encodeURIComponent(id)}/rsvp`,{status:value});
+      const result=await request(`/api/events/${encodeURIComponent(id)}/rsvp`,{status:value,comment:options.comment||'',submissionId:options.submissionId||''});
       if(generation!==epoch)return;
       const index=events.findIndex(event=>event.id===id);if(index>=0)events[index]={...events[index],...result.event};persist();emit();return result;
     },
