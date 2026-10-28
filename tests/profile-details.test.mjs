@@ -20,11 +20,11 @@ test('RSVP appearance uses each event theme and strips invalid CSS values',()=>{
 test('the profile retains Doorlist total event count separately from its upcoming preview',async()=>{
  const p=new DoorlistProvider();p.profile={id:'self'};p.token=async()=>'test-token';p.loadOwnPastEvents=async events=>events;
  p.api=async path=>path.startsWith('/api/users/uuid/')?{uuid:'self',name:'Self',friends:[]}:path.startsWith('/api/users/groups/')?{groups:[]}:path.startsWith('/api/events/profile/')?{eventCount:7,lightEvents:[{eventId:'upcoming-1',name:'Upcoming',time:Date.now()+3600000}]}:{};
- const result=await p.loadProfile();assert.equal(result.profile.eventCount,7);assert.equal(result.profile.events.length,1);assert.equal(result.profile.detailsVersion,2);
+ const result=await p.loadProfile();assert.equal(result.profile.eventCount,7);assert.equal(result.profile.events.length,1);assert.equal(result.profile.detailsVersion,3);
 });
 test('past event discovery is constrained to the authenticated user guest records',async()=>{
  const p=new DoorlistProvider();p.profile={id:'self'};p.firebase=async()=>'test-token';let read=[];
- p.request=async(_url,options)=>{const query=JSON.parse(options.body).structuredQuery;assert.equal(query.where.fieldFilter.value.stringValue,'self');return [{document:{fields:{uuid:{stringValue:'self'},eventID:{stringValue:'past-own'}}}},{document:{fields:{uuid:{stringValue:'other-user'},eventID:{stringValue:'past-other'}}}}];};
+ p.request=async(_url,options)=>{const query=JSON.parse(options.body).structuredQuery;assert.equal(query.where.fieldFilter.value.stringValue,'self');return [{document:{fields:{uuid:{stringValue:'self'},eventID:{stringValue:'past-own'},ticketCount:{integerValue:'1'}}}},{document:{fields:{uuid:{stringValue:'other-user'},eventID:{stringValue:'past-other'}}}}];};
  p.firestore=async path=>{read.push(path);return {fields:{name:{stringValue:'Actual past event'},time:{timestampValue:'2020-01-01T00:00:00Z'},endTime:{timestampValue:'2020-01-02T00:00:00Z'}}};};
  const events=await p.loadOwnPastEvents([]);assert.deepEqual(read,['eventObjects/past-own']);assert.equal(events[0].id,'past-own');
 });

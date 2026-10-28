@@ -455,29 +455,33 @@ export class DoorlistProvider {
       const rows=Array.isArray(result.lightEvents)?result.lightEvents:Array.isArray(result.events)?result.events:[];
       eventCount=Number.isInteger(result.eventCount)&&result.eventCount>=0?result.eventCount:rows.length;
       profileEvents=rows.map(raw=>{const event=normalizeEvent(raw,'invited');return event?{...this.allowedEvents.get(event.id),...event}:null;}).filter(Boolean);
-      if(eventCount>profileEvents.length)profileEvents=await this.loadOwnPastEvents(profileEvents);
+      const existing=new Map(profileEvents.map(event=>[event.id,event]));for(const event of this.allowedEvents.values())if(event.hasAdmission||event.rsvp==='going')existing.set(event.id,event);
+      profileEvents=await this.loadOwnPastEvents([...existing.values()]);
+      eventCount=this.profileEventLookupStatus===200?Math.max(eventCount,profileEvents.length):eventCount>0?eventCount:null;
     }catch{/* Saved profile events remain visible when the upstream feed is unavailable. */}
     this.profile={...this.profile,name:String(user.name||this.profile.name),photo:safeImage(user.profilePicture||user.profilePhotoUrl)||this.profile.photo,
       school:String(user.school||this.profile.school||''),bio:String(user.bio||''),shortId:String(user.shortID||this.profile.shortId||''),
       ...(friendsKnown?{friendCount:ids.length}:{}),...(friends?{friends}:{}),...(groups?{groups,groupCount:groups.length}:{}),
-      ...(profileEvents?{events:profileEvents}:{}),eventCount:eventCount??profileEvents?.length??this.coverage?.sources?.profile?.count??this.profile.eventCount??null,detailsVersion:2,detailsUpdatedAt:this.clock()};
+      ...(profileEvents?{events:profileEvents}:{}),eventCount:eventCount??(this.profileEventLookupStatus===200?profileEvents?.length:this.profile.detailsVersion>=3?this.profile.eventCount??null:null),profileEventLookupStatus:this.profileEventLookupStatus||null,detailsVersion:3,detailsUpdatedAt:this.clock()};
     this.profile.shareUrl=this.profile.shareUrl||profileShareUrl(this.profile.id,this.profile.shortId);
     if(this.profile.shareUrl&&!this.profile.shareQr)this.profile.shareQr=await QRCode.toString(this.profile.shareUrl,{type:'svg',margin:1,color:{dark:'#ffffff',light:'#00000000'}});
     this.rememberProfiles([this.profile]);
     return {profile:this.profile,profiles:this.listProfiles()};
   }
   async loadOwnPastEvents(existing) {
+    this.profileEventLookupStatus=null;
     try {
       const token=await this.firebase();
       const rows=await this.request(`https://firestore.googleapis.com/v1/projects/${this.config.firebaseProjectId}/databases/(default)/documents:runQuery`,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({structuredQuery:{from:[{collectionId:'guests',allDescendants:true}],where:{fieldFilter:{field:{fieldPath:'uuid'},op:'EQUAL',value:{stringValue:this.profile.id}}},limit:100}})});
+      this.profileEventLookupStatus=200;
       const known=new Set(existing.map(event=>event.id)),ids=[];
-      for(const row of Array.isArray(rows)?rows:[]){const guest=decodeFields(row.document?.fields||{}),id=String(guest.eventID||'');if(String(guest.uuid||'').toLowerCase()!==this.profile.id.toLowerCase()||known.has(id)||!/^([\w-]{5,100})$/.test(id))continue;known.add(id);ids.push(id);}
+      for(const row of Array.isArray(rows)?rows:[]){const guest=decodeFields(row.document?.fields||{}),id=String(guest.eventID||'');if(String(guest.uuid||'').toLowerCase()!==this.profile.id.toLowerCase()||(Number(guest.ticketCount||0)<=0&&normalizeStatus(guest.rsvpStatus)!=='going')||known.has(id)||!/^([\w-]{5,100})$/.test(id))continue;known.add(id);ids.push(id);}
       const past=[];const queue=ids.slice(0,50);
       await Promise.all(Array.from({length:Math.min(4,queue.length)},async()=>{
-        while(queue.length){const id=queue.shift();try{const document=await this.firestore(`eventObjects/${encodeURIComponent(id)}`),event=normalizeEvent({...decodeFields(document.fields),eventId:id},'invited');if(event?.endsAt&&new Date(event.endsAt).getTime()<=this.clock())past.push(event);}catch{/* Respect event-specific read permissions. */}}
+        while(queue.length){const id=queue.shift();try{const document=await this.firestore(`eventObjects/${encodeURIComponent(id)}`),event=normalizeEvent({...decodeFields(document.fields),eventId:id},'invited');if(event)past.push(event);}catch{/* Respect event-specific read permissions. */}}
       }));
       return [...existing,...past];
-    }catch{return existing;}
+    }catch(error){this.profileEventLookupStatus=error.status||502;return existing;}
   }
   async loadRsvpAppearance(fields,previous) {
     let theme=null;

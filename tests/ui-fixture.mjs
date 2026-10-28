@@ -13,7 +13,7 @@ const events = ['invited-fixture','discover-fixture','official-fixture'].map((id
 createDoorlistServer({port:4174,providerFactory:()=>({
   profile:null, clear(){this.profile=null;}, async sendCode(){},
   async verifyCode(){this.profile={id:'fixture-user',name:'Fixture User',photo:'profile.png'};return this.profile;},
-  async loadProfile(){this.profile={...this.profile,school:'BERK',friendCount:profiles.length,friends:profiles,groups:[],groupCount:0,eventCount:3,detailsVersion:2,detailsUpdatedAt:Date.now()};return {profile:this.profile,profiles};},
+  async loadProfile(){this.profile={...this.profile,school:'BERK',friendCount:profiles.length,friends:profiles,groups:[],groupCount:0,eventCount:3,detailsVersion:3,detailsUpdatedAt:Date.now()};return {profile:this.profile,profiles};},
   async setRsvp(id,status,{comment}={}){const event=events.find(event=>event.id===id);event.rsvp=status;return {event,commentSent:Boolean(comment)};},
   listProfiles(){return profiles;},
   async syncEvents(){if(process.env.FIXTURE_SLOW_REFRESH)await new Promise(resolve=>setTimeout(resolve,3000));return {events,profiles,suggestedFriends:[{id:'friend-one',name:'Jordan Lee',photo:'',mutualFriends:20},{id:'friend-two',name:'Alex Morgan',photo:'',mutualEvents:3},{id:'friend-three',name:'Riley Park',photo:'',mutualFriends:12},{id:'friend-four',name:'Taylor Chen',photo:'',mutualFriends:6}],profile:this.profile,coverage:{invited:2,discoverable:1,partial:false},syncedAt:new Date().toISOString()};},
