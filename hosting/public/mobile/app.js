@@ -16,6 +16,7 @@ const icons = {
   home: '<path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/>',
   bell: '<g transform="rotate(-18 12 12)"><path d="M18 9a6 6 0 0 0-12 0v3c0 2-1.2 3.5-2.5 4.6-.6.5-.3 1.4.5 1.4h16c.8 0 1.1-.9.5-1.4C19.2 15.5 18 14 18 12V9Z"/><path d="M10 21c.5 1 3.5 1 4 0M3 6l-1 3m19-3 1 3"/></g>',
   user: '<circle cx="12" cy="6.5" r="3.5"/><path d="M4.5 21v-1.5c0-4 3-6.5 7.5-6.5s7.5 2.5 7.5 6.5V21"/>',
+  userPlus: '<circle cx="9" cy="6" r="3"/><path d="M3 21v-2a6 6 0 0 1 9-5.2"/><circle cx="17" cy="17" r="5"/><path d="M17 14.5v5M14.5 17h5"/>',
   plus: '<path d="M12 4v16M4 12h16"/>',
   people: '<circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2M17 5a3 3 0 0 1 0 6m2 9v-2a6 6 0 0 0-2-4"/>',
   qr: '<path fill="currentColor" stroke="none" fill-rule="evenodd" d="M3 3h7v7H3V3Zm2 2v3h3V5H5Zm9-2h7v7h-7V3Zm2 2v3h3V5h-3ZM3 14h7v7H3v-7Zm2 2v3h3v-3H5Z"/><path fill="currentColor" stroke="none" d="M14 14h3v3h-3zm5 0h2v2h-2zm-5 5h2v2h-2zm4-1h3v3h-3z"/>',
@@ -261,18 +262,35 @@ function notificationPreviewSeed() {
   const key=`doorlist-notification-preview-${eventStore.getProfile().id||'demo'}`;
   try{const saved=Number(localStorage.getItem(key));if(saved>0)return saved;const seed=crypto.getRandomValues(new Uint32Array(1))[0]||1;localStorage.setItem(key,String(seed));return seed;}catch{return 23819;}
 }
-function notificationsPage() {
+let activityTab='friends';
+const activityScroll={friends:0,you:0};
+function activityRows() {
   const profile=eventStore.getProfile();
-  const people=eventStore.mode==='preview'?eventStore.getSuggestedFriends():eventStore.getProfiles();
-  const rows=createNotificationPreview({profiles:people,events:eventStore.listEvents(),selfId:profile.id,seed:notificationPreviewSeed()});
-  let previousGroup='';
-  return `<div class="activity-view"><header class="notifications-header"><h1>Notifications</h1><span class="notification-preview-label" title="Generated activity using your cached profiles">Preview</span></header>${rows.length?`<div class="notification-feed" aria-label="Generated notification preview">${rows.map(row=>{
-    const group=row.minutesAgo<1440?'Today':'This week';
-    const heading=previousGroup===group?'':`<h2 class="notification-group">${group}</h2>`;previousGroup=group;
-    const time=row.minutesAgo<60?`${row.minutesAgo}m`:row.minutesAgo<1440?`${Math.floor(row.minutesAgo/60)}h`:`${Math.floor(row.minutesAgo/1440)}d`;
-    const message=row.type==='friend-request'?'sent you a friend request.':row.type==='event-invite'?`invited you to <strong>${esc(row.event.title)}</strong>.`:`is going to <strong>${esc(row.event.title)}</strong>.`;
-    return `${heading}<article class="notification-row">${avatar(row.person,'notification-avatar')}<div class="notification-copy">${row.event?`<a href="#/event/${row.event.id}">`:'<div>'}<p><strong>${esc(row.person.name)}</strong> ${message} <time>${time}</time></p>${row.event?'</a>':'</div>'}${row.type==='friend-request'?`<div class="notification-request-actions"><button data-action="preview-accept-request">Accept</button><button data-action="preview-dismiss-request" aria-label="Dismiss preview request from ${esc(row.person.name)}">${icon('close')}</button></div>`:''}</div>${row.type!=='friend-request'&&row.event?.image?`<a class="notification-event-art" href="#/event/${row.event.id}" aria-label="Open ${esc(row.event.title)}"><img loading="lazy" src="${esc(row.event.image)}" alt=""></a>`:''}</article>`;
-  }).join('')}</div>`:empty('All caught up','Activity will appear here once your profiles are loaded.','bell')}${nav('bell')}</div>`;
+  return createNotificationPreview({profiles:eventStore.mode==='preview'?eventStore.getSuggestedFriends():eventStore.getProfiles(),events:eventStore.listEvents(),selfId:profile.id,seed:notificationPreviewSeed()});
+}
+function activityFeed(rows,tab=activityTab) {
+  if(!rows.length)return empty('All caught up','Activity will appear here once your profiles are loaded.','bell');
+  const timeFor=row=>row.minutesAgo<60?`${row.minutesAgo}m`:row.minutesAgo<1440?`${Math.floor(row.minutesAgo/60)}h`:`${Math.floor(row.minutesAgo/1440)}d`;
+  if(tab==='friends') {
+    let lastGroup='';
+    return `<div class="friends-activity-feed">${rows.map(row=>{
+      const group=row.minutesAgo<1440?'Today':row.minutesAgo<2880?'Yesterday':'This week';
+      const heading=lastGroup===group?'':`<h2 class="notification-group">${group}</h2>`;lastGroup=group;
+      return `${heading}<article class="friend-activity-item"><div class="friend-activity-heading">${avatar(row.person,'notification-avatar')}<div class="friend-activity-copy"><p><strong>${esc(row.person.name.split(' ')[0])}</strong> <time>${timeFor(row)}</time></p><p>${row.other?`Got a friend request from ${esc(row.other.name)}`:'Joined Doorlist'}</p></div><button class="activity-reaction" data-action="preview-activity-reaction" aria-label="React to preview activity from ${esc(row.person.name)}" aria-pressed="false">🙏</button></div>${row.other?`<div class="activity-photo-pair" aria-hidden="true">${avatar(row.other,'activity-photo-small')}${avatar(row.person,'activity-photo-large')}</div>`:''}</article>`;
+    }).join('')}</div>`;
+  }
+  const recent=rows.find(row=>row.event),rest=rows.filter(row=>row!==recent);
+  const personalRow=(row,index,invite=false)=>{
+    const accepted=!invite&&index%5===4;
+    const title=invite?"You're In!":accepted?'New Friend!':'New friend request!';
+    const description=invite?`Your request to join ${esc(row.event.title)} was accepted! Tap to see who else is going.`:accepted?`${esc(row.person.name)} accepted your request. Tap to view their profile`:`Tap to accept ${esc(row.person.name)} as a friend`;
+    return `<button class="personal-notification-row" data-action="${invite?'preview-event-notification':'preview-friend-notification'}" data-id="${invite?row.event.id:esc(row.person.id)}" data-name="${esc(row.person.name)}" data-kind="${accepted?'friend':'request'}">${avatar(row.person,'notification-avatar')}<span class="personal-notification-copy"><strong>${title}</strong><span>${description} ${invite?'':`<time>${Math.max(1,Math.floor(row.minutesAgo/1440))}d</time>`}</span></span>${invite&&row.event.image?`<img class="personal-event-art" src="${esc(row.event.image)}" alt="">`:''}</button>`;
+  };
+  return `<div class="personal-activity-feed">${recent?`<h2 class="notification-group">Recent Invites</h2>${personalRow(recent,0,true)}`:''}<h2 class="notification-group">Last 7 Days</h2>${rest.map((row,index)=>personalRow(row,index)).join('')}</div>`;
+}
+function notificationsPage() {
+  const rows=activityRows();
+  return `<div class="activity-view"><header class="notifications-header"><div class="activity-heading"><h1>Activity</h1><span class="notification-preview-label" title="Generated activity using your cached profiles">Preview</span></div><button class="glass-button activity-add-friends" data-action="add-friends" aria-label="Add friends">${icon('userPlus')}</button></header><div class="activity-segments" role="tablist" aria-label="Activity"><button role="tab" id="activityFriendsTab" aria-controls="activityFriendsFeed" aria-selected="${activityTab==='friends'}" data-action="activity-tab" data-tab="friends">Friends</button><button role="tab" id="activityYouTab" aria-controls="activityYouFeed" aria-selected="${activityTab==='you'}" data-action="activity-tab" data-tab="you">You</button></div><section id="activityFeed" class="notification-feed" aria-label="Generated activity preview"><div id="activityFriendsFeed" role="tabpanel" aria-labelledby="activityFriendsTab" ${activityTab==='friends'?'':'hidden'}>${activityFeed(rows,'friends')}</div><div id="activityYouFeed" role="tabpanel" aria-labelledby="activityYouTab" ${activityTab==='you'?'':'hidden'}>${activityFeed(rows,'you')}</div></section>${nav('bell')}</div>`;
 }
 function profilePage() {
   const profile = eventStore.getProfile();
@@ -453,8 +471,19 @@ document.addEventListener('click', async event => {
     const person=eventStore.getSuggestedFriends().find(item=>item.id===id);
     sheet(person?.name || 'Add friends',`<p class="dialog-description">Find your people and manage friend requests in Doorlist.</p><a class="primary-button" href="https://doorlist.app" target="_blank" rel="noopener noreferrer">Open Doorlist ${icon('next')}</a>`);
   }
-  if(action==='preview-accept-request'){button.textContent='Accepted';button.disabled=true;button.parentElement.querySelector('[data-action="preview-dismiss-request"]')?.remove();notify('Preview request accepted');}
-  if(action==='preview-dismiss-request')button.closest('.notification-row').remove();
+  if(action==='activity-tab'){
+    if(activityTab===button.dataset.tab)return;
+    activityScroll[activityTab]=pageNavigation.scroller.scrollTop;activityTab=button.dataset.tab;
+    app.querySelector('#activityFriendsFeed').hidden=activityTab!=='friends';app.querySelector('#activityYouFeed').hidden=activityTab!=='you';
+    app.querySelectorAll('[data-action="activity-tab"]').forEach(tab=>tab.setAttribute('aria-selected',String(tab.dataset.tab===activityTab)));
+    pageNavigation.scroller.scrollTop=activityScroll[activityTab];
+  }
+  if(action==='preview-activity-reaction'){const active=button.getAttribute('aria-pressed')!=='true';button.setAttribute('aria-pressed',String(active));}
+  if(action==='preview-event-notification')location.hash=`/event/${id}`;
+  if(action==='preview-friend-notification'){
+    sheet(button.dataset.kind==='friend'?'Friend preview':'Friend request',`<p class="dialog-description">${esc(button.dataset.name)}</p><p class="dialog-note">Generated activity preview using a cached profile.</p>${button.dataset.kind==='friend'?'':`<button class="primary-button" data-action="preview-accept-request">Accept</button>`}<button class="text-action" data-action="close-dialog">Close</button>`);
+  }
+  if(action==='preview-accept-request'){dialog.close();notify('Preview request accepted');}
   if (action==='rsvp') rsvpSheet(id);
   if(action==='select-rsvp'){
     dialog.querySelectorAll('[data-action="select-rsvp"]').forEach(option=>option.setAttribute('aria-pressed',String(option===button)));

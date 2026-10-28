@@ -9,6 +9,6 @@ export function createNotificationPreview({profiles=[],events=[],selfId='',seed=
   return Array.from({length:Math.min(limit,people.length)},(_,index)=>{
     const person=people[index],event=events.length?events[Math.floor(random()*events.length)]:null;
     const type=index%5===0?'friend-request':event?(index%3===0?'event-invite':'event-rsvp'):'friend-request';
-    return {id:`preview-${person.id}-${index}`,person,event,type,minutesAgo:index<6?5+index*24:1440+(index-6)*180,preview:true};
+    return {id:`preview-${person.id}-${index}`,person,other:people.length>1?people[(index+1)%people.length]:null,event,type,minutesAgo:index<6?3+index:1440+(index-6)*180,preview:true};
   });
 }

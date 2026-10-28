@@ -465,24 +465,39 @@ html[data-page-moving] .page-frame :is(.glass-button,.glass-panel,.dock-tabs,.ev
 .event-title[data-title-font="Serif"] { font-family:serif; }
 
 /* Main tabs exchange their retained screens immediately; event navigation slides. */
-.notifications-header { display:flex; align-items:center; justify-content:space-between; padding:calc(22px + env(safe-area-inset-top)) 20px 22px; }
-.mobile-app .notifications-header h1 { font-size:32px; font-weight:700; letter-spacing:-.7px; margin:0; }
-.notification-preview-label { font-size:11px; color:#96929f; padding:4px 8px; border:1px solid #ffffff18; border-radius:20px; }
-.notification-group { font-size:18px; font-weight:650; padding:12px 20px 8px; margin:0; }
-.notification-row { display:flex; align-items:flex-start; gap:12px; padding:15px 20px; min-height:76px; }
-.notification-row .notification-avatar { width:48px; height:48px; border-radius:50%; flex-shrink:0; object-fit:cover; }
-.notification-copy { flex:1; min-width:0; align-self:center; }
-.notification-copy a { text-decoration:none; color:inherit; }
-.notification-copy p { margin:0; font-size:14px; line-height:20px; font-weight:400; color:#e6e4eb; }
-.notification-copy strong { font-weight:650; color:#fff; }
-.notification-copy time { color:#8f899d; font-size:12px; white-space:nowrap; margin-left:4px; }
-.notification-request-actions { display:flex; gap:10px; margin-top:10px; }
-.notification-request-actions button { border:0; background:#267bff; border-radius:10px; padding:8px 25px; font:inherit; font-size:13px; font-weight:600; color:white; }
-.notification-request-actions button:last-child:not(:first-child) { width:34px; padding:6px; background:#ffffff12; color:#aaa6b5; }
-.notification-request-actions svg { width:16px; height:16px; }
-.notification-request-actions button:disabled { background:#ffffff12; color:#aaa6b5; }
-.notification-event-art { width:46px; height:56px; flex-shrink:0; margin-top:1px; border-radius:8px; overflow:hidden; }
-.notification-event-art img { width:100%; height:100%; object-fit:cover; }
+.activity-view { background:radial-gradient(ellipse 145% 205px at 57% -10px,#e78c9090,transparent 56%),radial-gradient(ellipse 145% 215px at 45% 4px,#48bcff 0,#116eae 41%,#07234b 67%,transparent 100%),#01020d; }
+.notifications-header { display:flex; align-items:center; justify-content:space-between; padding:calc(16px + env(safe-area-inset-top)) 20px 26px; min-height:92px; }
+.activity-heading { display:flex; align-items:center; gap:10px; }
+.mobile-app .notifications-header h1 { font-size:28px; line-height:34px; font-weight:700; letter-spacing:0; margin:0; }
+.notification-preview-label { font-size:10px; color:#c3c6d1; padding:3px 6px; border:1px solid #ffffff18; border-radius:20px; }
+.activity-add-friends { width:50px; height:50px; position:relative; }
+.activity-add-friends svg { width:27px; height:27px; }
+.activity-segments { display:flex; margin:0 20px 16px; padding:4px; height:44px; border-radius:24px; background:#ffffff10; }
+.activity-segments button { width:50%; border:0; border-radius:21px; background:none; color:white; font:inherit; font-size:14px; font-weight:500; }
+.activity-segments button[aria-selected="true"] { background:#a3a7b64a; box-shadow:inset 0 1px 1px #ffffff08; }
+.mobile-app .notification-group { font-size:17px; line-height:22px; font-weight:500; letter-spacing:0; padding:8px 20px 5px; margin:0; }
+.friend-activity-item { padding:0 20px 10px; }
+.friend-activity-heading { display:flex; align-items:flex-start; gap:12px; min-height:51px; }
+.notification-avatar { width:48px; height:48px; object-fit:cover; border-radius:50%; flex-shrink:0; }
+.friend-activity-heading .notification-avatar {width:50px;height:50px;}
+.friend-activity-copy { flex:1; min-width:0; padding-top:3px; color:#e8e7eb; font-size:16px; line-height:19px; }
+.friend-activity-copy strong { font-size:17px; font-weight:500; }
+.friend-activity-copy p { margin:0; }
+.notification-feed time { font-size:14px; color:#8c8994; font-weight:400; }
+.activity-reaction { flex-shrink:0; border:0; margin-top:1px; width:42px; height:42px; border-radius:50%; background:#ffffff17; font-size:24px; color:white; }
+.activity-reaction[aria-pressed="true"] { background:#297afa70; box-shadow:inset 0 0 0 1px #70a6ff80; }
+.activity-photo-pair { display:flex; justify-content:flex-end; align-items:flex-end; height:156px; margin-top:4px; padding-right:4px; }
+.activity-photo-pair .guest-avatar { object-fit:cover; border:0; border-radius:50%; }
+.activity-photo-pair .activity-photo-small { width:144px; height:144px; margin-right:-2px; }
+.activity-photo-pair .activity-photo-large { width:156px; height:156px; position:relative; }
+.personal-activity-feed .notification-group { color:#888590; padding-top:0; padding-bottom:12px; }
+.personal-activity-feed .personal-notification-row+.notification-group { padding-top:19px; }
+.personal-notification-row { display:flex; width:100%; align-items:center; gap:8px; padding:0 20px 16px; border:0; color:#edecf0; background:none; text-align:left; font:inherit; }
+.personal-notification-copy { display:flex; flex:1; min-width:0; flex-direction:column; gap:3px; font-size:16px; line-height:18px; }
+.personal-notification-copy>strong { font-size:16px; font-weight:600; line-height:20px; }
+.personal-notification-copy>span { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; }
+.personal-event-art { width:48px; height:48px; border-radius:9px; object-fit:cover; }
+@media(max-width:350px) { .activity-photo-pair .activity-photo-small {width:112px;height:112px;} .activity-photo-pair .activity-photo-large {width:136px;height:136px;} .activity-photo-pair {height:140px;} }
 .native-rsvp-options { display:flex; justify-content:center; gap:14px; padding:16px 0 20px; }
 .native-rsvp-options button { padding:0; background:none; border:0; color:#aaa6b5; display:flex; flex:1; flex-direction:column; align-items:center; gap:14px; cursor:pointer; }
 .native-rsvp-options strong { font-size:14px; font-weight:500; }
