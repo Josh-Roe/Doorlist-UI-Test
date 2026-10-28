@@ -588,3 +588,9 @@ html[data-page-moving] .page-frame :is(.glass-button,.glass-panel,.dock-tabs,.ev
 .native-profile-view .profile-list {padding-top:20px;text-align:left;}
 .mobile-app .native-profile-view .profile-list>h2 {margin-bottom:12px;}
 .dock-tabs a[aria-label="Profile"][aria-current="page"] svg {fill:currentColor;}
+.invited-by-section {margin:22px 20px;color:inherit;}
+.invited-by-section>span {display:flex;align-items:center;gap:8px;color:#c8c3d1;font-size:15px;margin-bottom:12px;}
+.invited-by-section>div {display:flex;align-items:center;gap:12px;}
+.invited-by-section .guest-avatar {width:42px;height:42px;border-radius:50%;object-fit:cover;}
+.invited-by-section strong {font-size:17px;font-weight:600;}
+.host-group-link {padding:0;border:0;background:none;color:inherit;font:inherit;font-weight:600;text-align:left;}

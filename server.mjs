@@ -90,10 +90,10 @@ export function createDoorlistServer({ providerFactory = () => new DoorlistProvi
         if (req.method === 'GET' && url.pathname === '/api/events') return json(res, 200, await needSession(req).provider.syncEvents());
         const rsvp=/^\/api\/events\/([\w-]{5,100})\/rsvp$/.exec(url.pathname);
         if(req.method==='POST'&&rsvp){const session=needSession(req);const data=await body(req);return json(res,200,await session.provider.setRsvp(rsvp[1],data.status,{comment:data.comment,submissionId:data.submissionId}));}
-        const match = /^\/api\/events\/([\w-]{5,100})(?:\/(guests|invite))?$/.exec(url.pathname);
+        const match = /^\/api\/events\/([\w-]{5,100})(?:\/(guests|invite|host-members))?$/.exec(url.pathname);
         if (req.method === 'GET' && match) {
           const provider = needSession(req).provider;
-          const result = match[2] === 'guests' ? await provider.loadGuests(match[1],{cursor:url.searchParams.get('cursor')||'',pageLimit:5,enrichPhotos:true}) : match[2] === 'invite' ? await provider.loadInvite(match[1]) : { event: await provider.loadEvent(match[1]) };
+          const result = match[2]==='host-members'?await provider.loadHostMembers(match[1]):match[2] === 'guests' ? await provider.loadGuests(match[1],{cursor:url.searchParams.get('cursor')||'',pageLimit:5,enrichPhotos:true}) : match[2] === 'invite' ? await provider.loadInvite(match[1]) : { event: await provider.loadEvent(match[1]) };
           return json(res, 200, result);
         }
         return json(res, 404, { error: 'Not found.' });

@@ -37,3 +37,8 @@ test('cache storage failures do not prevent login or event loading',async()=>{
  const store=await prime({getItem(){throw Error('Unavailable');},setItem(){throw Error('Full');},removeItem(){}});
  assert.equal(store.getEvent('saved-event').title,'Saved plan');
 });
+test('an older event refresh cannot overwrite a newer profile-history import',async()=>{
+ let latest=false;
+ const store=createEventStore({fetchImpl:async path=>Response.json(path==='/api/session'?{authenticated:true,profile:{id:'self',name:'Self'}}:path==='/api/profile'?{profile:{id:'self',name:'Self',eventCount:7,events:[],detailsUpdatedAt:200},profiles:[]}:{profile:{id:'self',name:'Self',eventCount:0,detailsUpdatedAt:100},events:[]})});
+ await store.initialize();await store.loadProfile();await store.refresh();assert.equal(store.getProfile().eventCount,7);assert.equal(store.getProfile().detailsUpdatedAt,200);
+});

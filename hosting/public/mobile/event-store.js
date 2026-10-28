@@ -38,6 +38,10 @@ export function createEventStore({fetchImpl=(...args)=>fetch(...args),storage=br
     }
     return data;
   }
+  function mergeProfile(incoming) {
+    if(profile.id!==incoming.id)return {...incoming};
+    return Number(profile.detailsUpdatedAt||0)>Number(incoming.detailsUpdatedAt||0)?{...incoming,...profile}:{...profile,...incoming};
+  }
   function applySnapshot(result,{merge=false}={}) {
     if(!result?.profile?.id)return;
     if(profile.id&&profile.id!==result.profile.id)reset();
@@ -46,7 +50,7 @@ export function createEventStore({fetchImpl=(...args)=>fetch(...args),storage=br
       guests:event.guestsLoaded?event.guests:previous.get(event.id)?.guests||event.guests||[],
       guestsLoaded:event.guestsLoaded||previous.get(event.id)?.guestsLoaded||false,
       guestListStale:Boolean(event.guestsLoaded||previous.get(event.id)?.guestsLoaded),detailsStale:true}:event);
-    suggestedFriends=result.suggestedFriends||[];profiles=result.profiles||profiles;profile=result.profile;
+    suggestedFriends=result.suggestedFriends||[];profiles=result.profiles||profiles;profile=mergeProfile(result.profile);
     coverage=result.coverage||null;syncedAt=result.syncedAt||null;mode='live';status='ready';persist();
   }
   const store={
@@ -72,7 +76,7 @@ export function createEventStore({fetchImpl=(...args)=>fetch(...args),storage=br
         const session=await request('/api/session');
         if(!session.authenticated){reset();emit();return;}
         if(profile.id&&profile.id!==session.profile.id)reset();
-        authenticated=true;profile=session.profile;mode='live';
+        authenticated=true;profile=mergeProfile(session.profile);mode='live';
         if(session.snapshot?.syncedAt)applySnapshot(session.snapshot,{merge:true});
         const update=this.refresh();emit();
         await update;
@@ -132,12 +136,13 @@ export function createEventStore({fetchImpl=(...args)=>fetch(...args),storage=br
       if(event)Object.assign(event,{guests,guestsLoaded:true,guestListStale:false,guestListRestricted:result.restricted,guestListPartial:result.partial,guestListGenerated:source==='profile-cache',guestListSource:source,guestListNextCursor:result.nextPageToken||null});
       persist();return {...result,guests,generated:source==='profile-cache',source};
     },
+    async loadHostMembers(id){const generation=epoch,result=await request(`/api/events/${encodeURIComponent(id)}/host-members`);if(generation!==epoch)return null;profiles=result.profiles||profiles;persist();return result.group;},
     async loadProfile(){
       if(!authenticated||mode!=='live')return this.getProfile();
       const generation=epoch;
       const result=await request('/api/profile');if(generation!==epoch)return;
       if(result.profile?.id!==profile.id)throw new Error('Your profile could not be loaded.');
-      profile=result.profile;profiles=result.profiles||profiles;persist();emit();return profile;
+      profile=mergeProfile(result.profile);profiles=result.profiles||profiles;persist();emit();return profile;
     },
     loadInvite:id=>request(`/api/events/${encodeURIComponent(id)}/invite`),
     async setRsvp(id,value,options={}){

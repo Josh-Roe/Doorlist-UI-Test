@@ -59,3 +59,16 @@ test('persistent authenticated sessions renew after reopening days later and log
  assert.equal(signout.status,200);assert.match(signout.headers.get('set-cookie'),/Max-Age=0/);assert.equal(row,null);
  assert.equal((await (await handleDoorlist(new Request('https://test.example/api/session',{headers:{Cookie:`doorlist_session=${raw}`}}),runtime)).json()).authenticated,false);
 });
+
+test('an event request cannot roll back profile details saved by a concurrent import',async t=>{
+ const {DoorlistProvider}=await import('../lib/doorlist-provider.mjs');
+ const raw=crypto.randomUUID(),id=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(raw))),b=>b.toString(16).padStart(2,'0')).join('');
+ const provider=profile=>({profile,allowedEvents:[],profilePool:[]});
+ const stale=await encryptSession({provider:provider({id:'self',name:'Self',eventCount:0,detailsUpdatedAt:100})},env,id);
+ const latest=await encryptSession({provider:provider({id:'self',name:'Self',eventCount:7,detailsUpdatedAt:200})},env,id);
+ let reads=0,saved;
+ const runtime={...env,DB:{prepare(sql){return{bind(...args){return{first:async()=>({ciphertext:++reads===1?stale:latest,expires_at:Date.now()+60000}),run:async()=>{if(sql.startsWith('INSERT INTO doorlist_sessions'))saved=args[1];return {success:true};}};}};}}};
+ t.mock.method(DoorlistProvider.prototype,'syncEvents',async function(){return {events:[],profile:this.profile};});
+ const response=await handleDoorlist(new Request('https://test.example/api/events',{headers:{Cookie:`doorlist_session=${raw}`}}),runtime);
+ assert.equal(response.status,200);assert.equal((await decryptSession(saved,env,id)).provider.profile.eventCount,7);
+});

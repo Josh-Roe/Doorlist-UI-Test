@@ -62,6 +62,14 @@ async function getSession(request:Request,env:Runtime) {
 }
 async function saveSession(session:any,env:Runtime) {
   const p=session.provider;
+  // Parallel event refreshes must not roll back a newer account-profile import.
+  if(p.profile)try {
+    const row=await env.DB!.prepare('SELECT ciphertext,expires_at FROM doorlist_sessions WHERE id=?').bind(session.id).first<{ciphertext:string,expires_at:number}>();
+    if(row&&row.expires_at>Date.now()){
+      const latest=await decryptSession(row.ciphertext,env,session.id),saved=latest.provider?.profile;
+      if(saved?.id===p.profile.id&&Number(saved.detailsUpdatedAt||0)>Number(p.profile.detailsUpdatedAt||0)){p.profile={...p.profile,...saved};p.rememberProfiles?.(saved.friends||[]);}
+    }
+  }catch{/* Keep the request's existing profile if storage cannot be reread. */}
   const data={phone:session.phone,codeTime:session.codeTime,attempts:session.attempts,
     provider:{profile:p.profile,accessToken:p.accessToken,refreshToken:p.refreshToken,expiresAt:p.expiresAt,
       firebaseToken:p.firebaseToken,firebaseExpiry:p.firebaseExpiry,allowedEvents:[...p.allowedEvents],profilePool:[...p.profilePool],
@@ -125,16 +133,16 @@ export async function handleDoorlist(request:Request,env:Runtime) {
     if(!session?.provider.profile)throw new ProviderError('Sign in to connect your Doorlist events.',401);
     const p=session.provider;
     const sessionHeaders={'Set-Cookie':cookie(session.raw,url.protocol==='https:')};
-    if(request.method==='GET'&&url.pathname==='/api/profile'){const result=await p.loadProfile();await saveSession(session,env);return reply(result,200,sessionHeaders);}
+    if(request.method==='GET'&&url.pathname==='/api/profile'){const result=await p.loadProfile();await saveSession(session,env);result.profile=p.profile;return reply(result,200,sessionHeaders);}
     if(request.method==='GET'&&url.pathname==='/api/profiles')return reply({profiles:p.listProfiles(),scope:'signed-in-account'});
     if(request.method==='GET'&&url.pathname==='/api/events') {
-      const result=await p.syncEvents();await saveSession(session,env);return reply(result,200,sessionHeaders);
+      const result=await p.syncEvents();await saveSession(session,env);result.profile=p.profile;return reply(result,200,sessionHeaders);
     }
     const rsvp=/^\/api\/events\/([\w-]{5,100})\/rsvp$/.exec(url.pathname);
     if(request.method==='POST'&&rsvp){const data=await readBody(request);const result=await p.setRsvp(rsvp[1],data.status,{comment:data.comment,submissionId:data.submissionId});await saveSession(session,env);return reply(result,200,sessionHeaders);}
-    const match=/^\/api\/events\/([\w-]{5,100})(?:\/(guests|invite))?$/.exec(url.pathname);
+    const match=/^\/api\/events\/([\w-]{5,100})(?:\/(guests|invite|host-members))?$/.exec(url.pathname);
     if(request.method==='GET'&&match) {
-      const result=match[2]==='guests'?await p.loadGuests(match[1],{cursor:url.searchParams.get('cursor')||'',pageLimit:5,enrichPhotos:true}):match[2]==='invite'?await p.loadInvite(match[1]):{event:await p.loadEvent(match[1])};
+      const result=match[2]==='host-members'?await p.loadHostMembers(match[1]):match[2]==='guests'?await p.loadGuests(match[1],{cursor:url.searchParams.get('cursor')||'',pageLimit:5,enrichPhotos:true}):match[2]==='invite'?await p.loadInvite(match[1]):{event:await p.loadEvent(match[1])};
       await saveSession(session,env);return reply(result,200,sessionHeaders);
     }
     return reply({error:'Not found.'},404);

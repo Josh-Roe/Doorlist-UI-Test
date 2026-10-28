@@ -156,6 +156,7 @@ export function normalizeEvent(event, access = 'discover') {
     theme: 'purple', rsvpAppearance:normalizeRsvpAppearance(event), background: normalizeBackground(event), fontFamily:normalizeEventFont(event.fontFamily), startsAt: start, endsAt: end,
     ...normalizeLocation(event.locationReadable && Object.values(event.locationReadable).some(Boolean) ? event.locationReadable : event.location, String(event.locationName || event.address || '')),
     goingCount:event.goingCount!=null&&Number.isInteger(Number(event.goingCount))&&Number(event.goingCount)>=0?Number(event.goingCount):null,
+    maybeCount:event.maybeCount!=null&&Number.isInteger(Number(event.maybeCount))&&Number(event.maybeCount)>=0?Number(event.maybeCount):null,
     description: String(event.description || ''), rsvp: 'invited', canRsvp: access === 'invited',
     access, source: 'doorlist', sourceUrl: `https://doorlist.app/e/${encodeURIComponent(event.linkID || id.slice(0, 7))}`,
     isPaidEvent: Boolean(event.isPaidEvent), guests: [], guestsLoaded: false, guestListPartial: false,
@@ -317,7 +318,7 @@ export class DoorlistProvider {
         const previous = merged.get(event.id);
         const access = previous?.access === 'invited' ? 'invited' : event.access;
         const cached=this.allowedEvents.get(event.id);
-        merged.set(event.id, { ...cached, ...previous, ...event, goingCount:event.goingCount??previous?.goingCount??cached?.goingCount??null,
+        merged.set(event.id, { ...cached, ...previous, ...event, goingCount:event.goingCount??previous?.goingCount??cached?.goingCount??null,maybeCount:event.maybeCount??previous?.maybeCount??cached?.maybeCount??null,
           background:normalizeBackground(raw,previous?.background||cached?.background)||previous?.background||cached?.background||null,
           fontFamily:normalizeEventFont(raw.fontFamily)||previous?.fontFamily||cached?.fontFamily||null,
           rsvpAppearance:cached?.rsvpAppearance?.themeResolved&&(!raw.themeURL||raw.themeURL===cached.rsvpAppearance.themeUrl)?{...cached.rsvpAppearance,...(raw.rsvpLottieStyle?{style:normalizeRsvpAppearance(raw).style}:{})}:event.rsvpAppearance,
@@ -417,6 +418,7 @@ export class DoorlistProvider {
         event.background=normalizeBackground(fields,event.background)||event.background||null;
         event.fontFamily=normalizeEventFont(fields.fontFamily)||event.fontFamily||null;
         if(fields.goingCount!=null&&Number.isInteger(Number(fields.goingCount))&&Number(fields.goingCount)>=0)event.goingCount=Number(fields.goingCount);
+        if(fields.maybeCount!=null&&Number.isInteger(Number(fields.maybeCount))&&Number(fields.maybeCount)>=0)event.maybeCount=Number(fields.maybeCount);
         if(!fields.hideDetailsIfNotOnList || event.access==='invited') {
           const location=normalizeLocation(fields.locationReadable || fields.location,String(fields.locationName || fields.address || ''));
           if(location.locationAddress)Object.assign(event,location);
@@ -437,7 +439,7 @@ export class DoorlistProvider {
     if(user.uuid&&String(user.uuid).toLowerCase()!==this.profile.id.toLowerCase())throw new ProviderError('Your profile could not be loaded.',502);
     const friendsKnown=Array.isArray(user.friends);
     const ids=[...new Set((friendsKnown?user.friends:[]).filter(id=>typeof id==='string'&&/^[\w-]{1,100}$/.test(id)))].slice(0,1000);
-    let friends=null,groups=null,profileEvents=null,eventCount=null;
+    let friends=null,groups=null,profileEvents=null,eventCount=null,eventCountComplete=false;
     try {
       if(!friendsKnown)throw new Error('Friends were not included in the profile response.');
       const rows=await Promise.all(Array.from({length:Math.ceil(ids.length/100)},(_,i)=>this.api('/api/users/light_details',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({uuids:ids.slice(i*100,i*100+100)})})));
@@ -451,25 +453,62 @@ export class DoorlistProvider {
       groups=rows.map(group=>({id:String(group.id||group.uuid||''),name:String(group.name||group.orgName||'Group'),photo:safeImage(group.orgCoverPhoto||group.profilePicture||group.image)})).filter(group=>group.id);
     }catch{/* Group access is optional. */}
     try {
-      const token=await this.token(),result=await this.api(`/api/events/profile/${encodeURIComponent(this.profile.id)}?token=${encodeURIComponent(token)}`);
-      const rows=Array.isArray(result.lightEvents)?result.lightEvents:Array.isArray(result.events)?result.events:[];
-      eventCount=Number.isInteger(result.eventCount)&&result.eventCount>=0?result.eventCount:rows.length;
-      profileEvents=rows.map(raw=>{const event=normalizeEvent(raw,'invited');return event?{...this.allowedEvents.get(event.id),...event}:null;}).filter(Boolean);
-      const existing=new Map(profileEvents.map(event=>[event.id,event]));for(const event of this.allowedEvents.values())if(event.hasAdmission||event.rsvp==='going')existing.set(event.id,event);
+      const token=await this.token(),attempts=[];
+      const variants=[this.profile.id];if(/^[a-f0-9-]{36}$/i.test(this.profile.id)&&this.profile.id!==this.profile.id.toLowerCase())variants.push(this.profile.id.toLowerCase());
+      const results=await Promise.all(variants.map(async id=>{
+        try {const result=await this.api(`/api/events/profile/${encodeURIComponent(id)}?token=${encodeURIComponent(token)}`);attempts.push({identityCase:id===this.profile.id?'canonical':'lowercase',status:200,total:typeof result.eventCount==='number'?result.eventCount:null,rows:Array.isArray(result.lightEvents)?result.lightEvents.length:Array.isArray(result.events)?result.events.length:null});return result;}
+        catch(error){attempts.push({identityCase:id===this.profile.id?'canonical':'lowercase',status:error.status||502});return null;}
+      }));
+      let result=results.filter(Boolean).sort((a,b)=>(Number(b.eventCount)||0)-(Number(a.eventCount)||0))[0]||{};
+      const existing=new Map((this.profile.events||[]).map(event=>[event.id,event]));
+      const absorb=source=>{for(const raw of Array.isArray(source.lightEvents)?source.lightEvents:Array.isArray(source.events)?source.events:[]){const event=normalizeEvent(raw,'invited');if(event)existing.set(event.id,{...this.allowedEvents.get(event.id),...event});}};
+      results.filter(Boolean).forEach(absorb);
+      for(const event of this.allowedEvents.values())if(event.hasAdmission||event.rsvp==='going')existing.set(event.id,event);
       profileEvents=await this.loadOwnPastEvents([...existing.values()]);
-      eventCount=this.profileEventLookupStatus===200?Math.max(eventCount,profileEvents.length):eventCount>0?eventCount:null;
-    }catch{/* Saved profile events remain visible when the upstream feed is unavailable. */}
+      if(!(Number(result.eventCount)>0)) {
+        try {const nativeToken=await this.firebase(),nativeResult=await this.request(`https://doorlist.app/api/events/profile/${encodeURIComponent(this.profile.id)}?token=${encodeURIComponent(nativeToken)}`,{headers:{Authorization:`Bearer ${nativeToken}`}});attempts.push({authentication:'firebase',status:200,total:typeof nativeResult.eventCount==='number'?nativeResult.eventCount:null,rows:Array.isArray(nativeResult.lightEvents)?nativeResult.lightEvents.length:null});if(Number(nativeResult.eventCount)>Number(result.eventCount||0)){result=nativeResult;absorb(nativeResult);profileEvents=[...new Map([...profileEvents,...existing.values()].map(event=>[event.id,event])).values()];}}
+        catch(error){attempts.push({authentication:'firebase',status:error.status||502});}
+      }
+      const webTotal=Math.max(0,...results.filter(Boolean).map(result=>Number.isInteger(result.eventCount)?result.eventCount:0));
+      eventCount=webTotal>0?Math.max(webTotal,profileEvents.length):profileEvents.length||null;
+      eventCountComplete=webTotal>0&&webTotal>=profileEvents.length;
+      const claims=token=>{try{return JSON.parse(atob(token.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));}catch{return {};}};
+      const supabase=claims(this.accessToken||''),firebase=claims(this.firebaseToken||'');
+      this.profile.eventCoverage={attempts,historyStatus:this.profileEventLookupStatus,supabaseMatchesProfile:String(supabase.sub||'').toLowerCase()===this.profile.id.toLowerCase(),firebaseMatchesProfile:String(firebase.user_id||firebase.sub||'').toLowerCase()===this.profile.id.toLowerCase(),arrayFields:Object.keys(user).filter(key=>Array.isArray(user[key])),records:this.profileRecordCoverage||null};
+    }catch(error){this.profile.eventCoverage={failed:true,errorType:String(error.name||'Error'),reason:['TypeError','ReferenceError'].includes(error.name)?String(error.message||'').slice(0,160):'Profile event feed unavailable'};}
     this.profile={...this.profile,name:String(user.name||this.profile.name),photo:safeImage(user.profilePicture||user.profilePhotoUrl)||this.profile.photo,
       school:String(user.school||this.profile.school||''),bio:String(user.bio||''),shortId:String(user.shortID||this.profile.shortId||''),
       ...(friendsKnown?{friendCount:ids.length}:{}),...(friends?{friends}:{}),...(groups?{groups,groupCount:groups.length}:{}),
-      ...(profileEvents?{events:profileEvents}:{}),eventCount:eventCount??(this.profileEventLookupStatus===200?profileEvents?.length:this.profile.detailsVersion>=3?this.profile.eventCount??null:null),profileEventLookupStatus:this.profileEventLookupStatus||null,detailsVersion:3,detailsUpdatedAt:this.clock()};
+      ...(profileEvents?{events:profileEvents}:{}),eventCount:eventCount??(this.profile.eventCountVerified?this.profile.eventCount:null),eventCountVerified:this.profileEventLookupStatus===200,eventCountComplete,profileEventLookupStatus:this.profileEventLookupStatus||null,detailsVersion:10,detailsUpdatedAt:this.clock()};
     this.profile.shareUrl=this.profile.shareUrl||profileShareUrl(this.profile.id,this.profile.shortId);
     if(this.profile.shareUrl&&!this.profile.shareQr)this.profile.shareQr=await QRCode.toString(this.profile.shareUrl,{type:'svg',margin:1,color:{dark:'#ffffff',light:'#00000000'}});
     this.rememberProfiles([this.profile]);
     return {profile:this.profile,profiles:this.listProfiles()};
   }
+  async loadProfileEventRecords(existing) {
+    const candidates=new Map(existing.map(event=>[event.id,event])),feeds=[];
+    const add=response=>{const rows=[...(Array.isArray(response?.events)?response.events:[]),...(Array.isArray(response?.lightEvents)?response.lightEvents:[])];for(const raw of rows){const event=normalizeEvent(raw,'invited');if(event)candidates.set(event.id,{...candidates.get(event.id),...event,administrator:String(raw.administrator||'')});}return rows;};
+    try {const token=await this.token(),response=await this.api(`/api/events/forUser/${encodeURIComponent(this.profile.id)}?token=${encodeURIComponent(token)}`),rows=add(response);feeds.push({authentication:'supabase',status:200,rows:rows.length});}catch(error){feeds.push({authentication:'supabase',status:error.status||502});}
+    try {const token=await this.firebase(),response=await this.request(`https://doorlist.app/api/events/forUser/${encodeURIComponent(this.profile.id)}?token=${encodeURIComponent(token)}`,{headers:{Authorization:`Bearer ${token}`}}),rows=add(response);feeds.push({authentication:'firebase',status:200,rows:rows.length});}catch(error){feeds.push({authentication:'firebase',status:error.status||502});}
+    // Public campus cards provide candidate IDs only. Attendance still comes from this user's own guest record.
+    try {const response=await this.campusEvents(),rows=add(response);feeds.push({authentication:'campus',status:200,rows:rows.length,partial:Boolean(response.partial)});}catch(error){feeds.push({authentication:'campus',status:error.status||502});}
+    this.profileRecordCoverage={feeds,candidates:candidates.size,statuses:{},unavailable:0};
+    if(!feeds.some(feed=>feed.status===200&&feed.rows>0))throw new ProviderError('The account event feed is unavailable.',503);
+    const queue=[...candidates.values()].slice(0,500),confirmed=[];
+    await Promise.all(Array.from({length:Math.min(4,queue.length)},async()=>{
+      while(queue.length){const event=queue.shift();try {
+        const document=await this.firestore(`eventObjects/${encodeURIComponent(event.id)}/guests/${encodeURIComponent(this.profile.id)}`),guest=decodeFields(document.fields);
+        if(guest.uuid&&String(guest.uuid).toLowerCase()!==this.profile.id.toLowerCase())continue;
+        const status=normalizeStatus(guest.rsvpStatus);this.profileRecordCoverage.statuses[status]=(this.profileRecordCoverage.statuses[status]||0)+1;
+        if(status==='going'||Number(guest.ticketCount)>0||String(event.administrator||'').toLowerCase()===this.profile.id.toLowerCase())confirmed.push({...event,rsvp:status,hasAdmission:Number(guest.ticketCount)>0});
+      }catch(error){if(error.status!==404)this.profileRecordCoverage.unavailable++;}}
+    }));
+    this.profileEventLookupStatus=this.profileRecordCoverage.unavailable||candidates.size>500||feeds.some(feed=>feed.partial)?206:200;
+    return confirmed;
+  }
   async loadOwnPastEvents(existing) {
     this.profileEventLookupStatus=null;
+    try{return await this.loadProfileEventRecords(existing);}catch{/* Fall back to an authorized owner-record query when the feed is unavailable. */}
     try {
       const token=await this.firebase();
       const rows=await this.request(`https://firestore.googleapis.com/v1/projects/${this.config.firebaseProjectId}/databases/(default)/documents:runQuery`,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({structuredQuery:{from:[{collectionId:'guests',allDescendants:true}],where:{fieldFilter:{field:{fieldPath:'uuid'},op:'EQUAL',value:{stringValue:this.profile.id}}},limit:100}})});
@@ -509,11 +548,11 @@ export class DoorlistProvider {
       const fields = decodeFields(details.value.fields);
       const appearance=await this.loadRsvpAppearance(fields,event.rsvpAppearance);
       const normalized = normalizeEvent({ ...fields, eventId: id }, event.access);
-      if (normalized) event = { ...event, ...normalized, rsvpAppearance:appearance, background:normalizeBackground(fields,event.background)||event.background||null, fontFamily:normalizeEventFont(fields.fontFamily)||event.fontFamily||null, guests:event.guests||[],guestsLoaded:event.guestsLoaded||false, image: normalized.image || event.image, hostPhoto: normalized.hostPhoto || event.hostPhoto, location:normalized.locationAddress?normalized.location:event.location, locationAddress:normalized.locationAddress||event.locationAddress, goingCount:normalized.goingCount??event.goingCount };
+      if (normalized) event = { ...event, ...normalized, rsvpAppearance:appearance, background:normalizeBackground(fields,event.background)||event.background||null, fontFamily:normalizeEventFont(fields.fontFamily)||event.fontFamily||null, guests:event.guests||[],guestsLoaded:event.guestsLoaded||false, image: normalized.image || event.image, hostPhoto: normalized.hostPhoto || event.hostPhoto, location:normalized.locationAddress?normalized.location:event.location, locationAddress:normalized.locationAddress||event.locationAddress, goingCount:normalized.goingCount??event.goingCount,maybeCount:normalized.maybeCount??event.maybeCount };
     }
     if (guest.status === 'fulfilled') {
       const fields = decodeFields(guest.value.fields);
-      event = { ...event, rsvp: normalizeStatus(fields.rsvpStatus), plusOneRequested: Boolean(fields.requestedPlusOnes), hasAdmission: Number(fields.ticketCount) > 0 };
+      event = { ...event, invitedBy:await this.resolveInviter(fields),rsvp: normalizeStatus(fields.rsvpStatus), plusOneRequested: Boolean(fields.requestedPlusOnes), hasAdmission: Number(fields.ticketCount) > 0 };
     }
     const authorizationError = result => result.status === 'rejected' && result.reason.status === 401;
     if ([details, guest].some(authorizationError)) throw new ProviderError('Your Doorlist session expired. Please sign in again.', 401);
@@ -525,6 +564,28 @@ export class DoorlistProvider {
     event.detailsRestricted = details.status === 'rejected';
     this.allowedEvents.set(id, event);
     return event;
+  }
+  async resolveInviter(guest) {
+    const id=typeof guest.addedBy==='string'?guest.addedBy.trim():'';
+    if(!/^[\w-]{5,100}$/.test(id)||id.toLowerCase()===String(this.profile?.id||'').toLowerCase())return null;
+    try {
+      const data=await this.api('/api/users/light_details',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({uuids:[id]})});
+      const person=data[id]||data[id.toLowerCase()]||data[id.toUpperCase()];
+      if(person?.name){const inviter={id,name:String(person.name),photo:safeImage(person.profilePictureUrl||person.profilePicture||person.profilePhotoUrl),source:'doorlist-guest-record'};this.rememberProfiles([inviter]);return inviter;}
+    }catch{/* An unavailable inviter is omitted; group members are never substituted. */}
+    return null;
+  }
+  async loadHostMembers(eventId) {
+    const event=this.requireEvent(eventId);
+    if(!/^[\w-]{1,100}$/.test(event.hostId||''))throw new ProviderError('This host has not shared a member list.',404);
+    const response=await this.api(`/api/group/${encodeURIComponent(event.hostId)}`);let group=response.group||response;
+    if(!Array.isArray(group.members)||!group.members.length)try{const document=await this.firestore(`organizations/${encodeURIComponent(event.hostId)}`),details=decodeFields(document.fields);if(Array.isArray(details.members))group={...group,...details};}catch{/* Respect host member permissions. */}
+    if(!Array.isArray(group.members))throw new ProviderError('Doorlist has not shared this group’s member list with your account.',403);
+    const people=group.members.filter(member=>member&&typeof member==='object'&&member.name).map(member=>({id:String(member.uuid||member.id||''),name:String(member.name),photo:safeImage(member.profilePictureUrl||member.profilePicture||member.profilePhotoUrl)}));
+    const ids=[...new Set(group.members.map(member=>typeof member==='string'?member:member.uuid||member.id).filter(id=>typeof id==='string'&&/^[\w-]{1,100}$/.test(id)))].slice(0,1000);
+    for(let i=0;i<ids.length;i+=100){const data=await this.api('/api/users/light_details',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({uuids:ids.slice(i,i+100)})});for(const id of ids.slice(i,i+100)){const person=data[id]||data[id.toLowerCase()]||data[id.toUpperCase()];if(person?.name)people.push({id,name:String(person.name),photo:safeImage(person.profilePictureUrl||person.profilePicture||person.profilePhotoUrl)});}}
+    const members=[...new Map(people.filter(person=>person.id).map(person=>[person.id,person])).values()];this.rememberProfiles(members);
+    return {group:{id:event.hostId,name:String(group.name||group.orgName||event.host),members},profiles:this.listProfiles()};
   }
   async setRsvp(id, status, {comment='',submissionId=''}={}) {
     const event=this.requireEvent(id);
@@ -587,6 +648,7 @@ export class DoorlistProvider {
     const previous=guest.rsvpStatus?normalizeStatus(guest.rsvpStatus):event.rsvp;
     const next={...event,rsvp:status,hasAdmission:true};
     if(Number.isInteger(event.goingCount)&&previous!==status)next.goingCount=Math.max(0,event.goingCount+(status==='going'?1:0)-(previous==='going'?1:0));
+    if(Number.isInteger(event.maybeCount)&&previous!==status)next.maybeCount=Math.max(0,event.maybeCount+(status==='maybe'?1:0)-(previous==='maybe'?1:0));
     next.guests=(event.guests||[]).map(person=>person.id===this.profile.id?{...person,status,attendanceVerified:true}:person);
     this.allowedEvents.set(id,next);
     return {event:next,commentSent:Boolean(comment)&&!commentError,commentError};
