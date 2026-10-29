@@ -121,7 +121,7 @@ export function normalizeLocation(value, fallback = '') {
   }
   return {location:fallback || 'Location not shared',locationAddress:fallback || ''};
 }
-const eventFontFamilies=new Set(['Bartle','BricolageGrotesque','Glitch','Graffiti','Pixelify','Varela','Serif']);
+const eventFontFamilies=new Set(['Bartle','BricolageGrotesque','Glitch','Graffiti','Pixelify','Varela','Serif','Schoolbell','Limelight','Norican']);
 export function normalizeEventFont(value) {
   return typeof value==='string' && eventFontFamilies.has(value.trim()) ? value.trim() : null;
 }
@@ -429,6 +429,7 @@ export class DoorlistProvider {
         const fields=decodeFields(location.value.fields);
         event.background=normalizeBackground(fields,event.background)||event.background||null;
         event.fontFamily=normalizeEventFont(fields.fontFamily)||event.fontFamily||null;
+        if(typeof fields.name==='string'&&fields.name.trim())event.title=fields.name;
         if(fields.goingCount!=null&&Number.isInteger(Number(fields.goingCount))&&Number(fields.goingCount)>=0)event.goingCount=Number(fields.goingCount);
         if(fields.maybeCount!=null&&Number.isInteger(Number(fields.maybeCount))&&Number(fields.maybeCount)>=0)event.maybeCount=Number(fields.maybeCount);
         if(!fields.hideDetailsIfNotOnList || event.access==='invited') {

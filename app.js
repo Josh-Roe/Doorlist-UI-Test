@@ -1,3 +1,4 @@
+import { displayEventTitle } from './event-typography.js';
 import { createNotificationPreview } from './notification-feed.js';
 import { createPageNavigation } from './page-navigation.js?v=tabs-3';
 import { eventStore } from './event-store.js';
@@ -99,14 +100,14 @@ document.addEventListener('error', event => {
 },true);
 function poster(event) {
   if (event.image && event.image !== 'event.png') return `<img class="uploaded-poster" loading="lazy" decoding="async" src="${esc(event.image)}" alt="">`;
-  return `<div class="event-art art-${esc(event.theme)}" aria-hidden="true"><span class="art-orbit orbit-one"></span><span class="art-orbit orbit-two"></span><div class="poster-copy"><small>${esc(event.host)} PRESENTS</small><strong>${esc(event.title)}</strong><span>${esc(dateParts(event).full)} · ${esc(dateParts(event).time)}</span></div><span class="poster-star star-one">✦</span><span class="poster-star star-two">✦</span></div>`;
+  return `<div class="event-art art-${esc(event.theme)}" aria-hidden="true"><span class="art-orbit orbit-one"></span><span class="art-orbit orbit-two"></span><div class="poster-copy"><small>${esc(event.host)} PRESENTS</small><strong>${esc(displayEventTitle(event))}</strong><span>${esc(dateParts(event).full)} · ${esc(dateParts(event).time)}</span></div><span class="poster-star star-one">✦</span><span class="poster-star star-two">✦</span></div>`;
 }
 function eventCard(event, featured = false) {
   const date = dateParts(event);
-  return `<a class="event-card ${featured ? 'featured-card' : 'small-event-card'}" href="#/event/${event.id}" aria-label="Open ${esc(event.title)}">
+  return `<a class="event-card ${featured ? 'featured-card' : 'small-event-card'}" href="#/event/${event.id}" aria-label="Open ${esc(displayEventTitle(event))}">
     <div class="event-poster">${poster(event)}<span class="date-badge"><strong>${date.day}</strong><span>${date.weekday}</span></span>
-    ${featured ? `<div class="hero-caption"><div class="host-line">${hostAvatar(event)}${esc(event.host)}</div><h3>${esc(event.title)}</h3><p>${date.time} – ${date.endTime} | ${esc(event.location)}</p></div>${avatarStack(event)}` : ''}</div>
-    ${!featured ? `<div class="card-caption"><span>${esc(event.host)}</span><h3>${esc(event.title)}</h3><p>${date.full} · ${date.time}${event.source === 'doorlist' ? ` · ${event.access === 'invited' ? 'Invited' : 'Discover'}` : ''}</p></div>` : ''}
+    ${featured ? `<div class="hero-caption"><div class="host-line">${hostAvatar(event)}${esc(event.host)}</div><h3>${esc(displayEventTitle(event))}</h3><p>${date.time} – ${date.endTime} | ${esc(event.location)}</p></div>${avatarStack(event)}` : ''}</div>
+    ${!featured ? `<div class="card-caption"><span>${esc(event.host)}</span><h3>${esc(displayEventTitle(event))}</h3><p>${date.full} · ${date.time}${event.source === 'doorlist' ? ` · ${event.access === 'invited' ? 'Invited' : 'Discover'}` : ''}</p></div>` : ''}
   </a>`;
 }
 function nav(selected = 'home') {
@@ -143,13 +144,28 @@ const warmedTitleFonts=new Set();
 function warmEventTitleFonts(events) {
   if(!document.fonts?.load)return;
   for(const family of new Set(events.map(event=>event.fontFamily||'BricolageGrotesque'))) {
-    if(!['Bartle','BricolageGrotesque','Glitch','Graffiti','Pixelify','Varela'].includes(family)||warmedTitleFonts.has(family))continue;
+    if(!['Bartle','BricolageGrotesque','Glitch','Graffiti','Pixelify','Varela','Schoolbell','Limelight','Norican'].includes(family)||warmedTitleFonts.has(family))continue;
     warmedTitleFonts.add(family);
-    const weight=family==='Glitch'?700:600;
+    const weight=family==='Glitch'?700:['Bartle','Graffiti','Varela','Schoolbell','Limelight','Norican'].includes(family)?400:600;
     const load=()=>document.fonts.load(`${weight} 42px "${family}"`).catch(()=>warmedTitleFonts.delete(family));
     if(window.requestIdleCallback)requestIdleCallback(load,{timeout:1500});else setTimeout(load,0);
   }
 }
+const measuredTitles=new WeakSet(),titleCanvas=document.createElement('canvas'),titleContext=titleCanvas.getContext('2d');
+function fitEventTitle(title) {
+  if(!titleContext||!title.isConnected)return;
+  const style=getComputedStyle(title),available=title.clientWidth-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight);
+  if(available<=0)return;
+  const base=parseFloat(style.getPropertyValue('--event-title-base-size'))||42;
+  titleContext.font=`${style.fontWeight} ${base}px ${style.fontFamily}`;
+  const longest=Math.max(0,...title.textContent.split(/\s+/).map(word=>titleContext.measureText(word).width));
+  const size=Math.max(18,Math.min(base,base*available/Math.max(1,longest)));
+  const value=`${Math.floor(size*100)/100}px`;
+  if(title.style.getPropertyValue('--event-title-fit-size')!==value)title.style.setProperty('--event-title-fit-size',value);
+}
+const titleObserver=new ResizeObserver(entries=>entries.forEach(entry=>fitEventTitle(entry.target)));
+function bindEventTitleFit(){for(const title of app.querySelectorAll('.event-title')){if(!measuredTitles.has(title)){measuredTitles.add(title);titleObserver.observe(title);}fitEventTitle(title);}}
+document.fonts?.addEventListener('loadingdone',()=>bindEventTitleFit());
 function home() {
   const events=eventStore.listEvents();
   warmEventTitleFonts(events);
@@ -195,14 +211,14 @@ function bindTemplateMotion() {
   updateConfettiPlayback();
 }
 function eventRow(event) {
-  return `<a class="event-row" href="#/event/${event.id}"><span class="event-row-art">${poster(event)}</span><span class="event-row-copy"><strong>${esc(event.title)}</strong><span>${esc(dateParts(event).full)} · ${esc(dateParts(event).time)}</span></span>${icon('next')}</a>`;
+  return `<a class="event-row" href="#/event/${event.id}"><span class="event-row-art">${poster(event)}</span><span class="event-row-copy"><strong>${esc(displayEventTitle(event))}</strong><span>${esc(dateParts(event).full)} · ${esc(dateParts(event).time)}</span></span>${icon('next')}</a>`;
 }
 function eventPage(event) {
   const date = dateParts(event);
   const maybe=event.maybeCount??event.guests.filter(guest=>guest.status==='maybe').length;
   const going = event.goingCount ?? (event.guests.filter(guest=>guest.status==='going').length + (event.source !== 'doorlist' && event.rsvp==='going' ? 1 : 0));
   return `<div class="event-view theme-${esc(event.theme)}${event.background?.isDark===false?' background-is-light':''}">${confettiBackground(event)}${topbar('/', '', `<button class="glass-button" data-action="event-menu" data-id="${event.id}" aria-label="Event options">${icon('more')}</button>`)}
-    <h1 class="event-title" data-title-font="${esc(event.fontFamily||'BricolageGrotesque')}">${esc(event.title)}</h1><div class="detail-poster">${poster(event)}</div>
+    <h1 class="event-title" data-title-font="${esc(event.fontFamily||'BricolageGrotesque')}">${esc(displayEventTitle(event))}</h1><div class="detail-poster">${poster(event)}</div>
     <a class="guest-summary glass-panel" href="#/event/${event.id}/guests">${avatarStack(event)}<span><strong>Guest List</strong><small>${going} going | ${maybe} maybe</small></span><span class="see-all">See All ${icon('next')}</span></a>
     ${event.invitedBy?`<section class="invited-by-section"><span>${icon('people')}Invited by</span><div>${avatar(event.invitedBy)}<strong>${esc(event.invitedBy.name)}</strong></div></section>`:''}
     <section class="event-info"><div class="info-line"><span class="info-icon">${icon('calendar')}</span><div><span>Date</span><strong>${date.full}</strong><p>${date.time} – ${date.endTime}</p></div></div><div class="info-line">${hostAvatar(event)}<div><span>Hosted by</span>${event.hostId?`<button class="host-group-link" data-action="host-members" data-id="${event.id}">${esc(event.host)}</button>`:`<strong>${esc(event.host)}</strong>`}</div></div><div class="info-line"><span class="info-icon">${icon('pin')}</span><div><span>Location</span><strong>${esc(event.location)}</strong>${event.locationAddress?`<a class="location-link" href="https://maps.apple.com/?q=${encodeURIComponent(event.locationAddress)}" target="_blank" rel="noopener noreferrer">${esc(event.locationAddress)}</a>`:''}</div></div></section>
@@ -215,7 +231,7 @@ function sharedPlaylistSection(event) {
 }
 function guestListPage(event) {
   if(currentRoute!==`/event/${event.id}/guests`){guestFilter='all';guestQuery='';guestVisibleCount=GUEST_BATCH_SIZE;guestBatchError='';}
-  return `<div class="guest-list-view">${topbar(`/event/${event.id}`)}<h1 class="sr-only">${esc(event.title)} guest list</h1><div class="guest-controls"><div class="segmented-control" role="group" aria-label="Filter guests">${[['all','All'],['going','Going'],['maybe','Maybe']].map(([id,label])=>`<button data-action="guest-filter" data-filter="${id}" aria-pressed="${id===guestFilter}">${label}</button>`).join('')}</div><label class="search-field">${icon('search')}<input id="guestSearch" type="search" value="${esc(guestQuery)}" placeholder="Search Guests" aria-label="Search guests" autocomplete="off"></label></div><div id="guestResults" class="guest-results" aria-live="polite">${guestRows(event)}</div><p class="preview-note">${guestSourceNote(event)}</p></div>`;
+  return `<div class="guest-list-view">${topbar(`/event/${event.id}`)}<h1 class="sr-only">${esc(displayEventTitle(event))} guest list</h1><div class="guest-controls"><div class="segmented-control" role="group" aria-label="Filter guests">${[['all','All'],['going','Going'],['maybe','Maybe']].map(([id,label])=>`<button data-action="guest-filter" data-filter="${id}" aria-pressed="${id===guestFilter}">${label}</button>`).join('')}</div><label class="search-field">${icon('search')}<input id="guestSearch" type="search" value="${esc(guestQuery)}" placeholder="Search Guests" aria-label="Search guests" autocomplete="off"></label></div><div id="guestResults" class="guest-results" aria-live="polite">${guestRows(event)}</div><p class="preview-note">${guestSourceNote(event)}</p></div>`;
 }
 function guestCandidates(event) {
   return orderedGuests(event.guests,eventStore.getProfile()).map(person=>({...person,status:guestDisplayStatus(person)})).filter(person=>{
@@ -289,7 +305,7 @@ function activityFeed(rows,tab=activityTab) {
   const personalRow=(row,index,invite=false)=>{
     const accepted=!invite&&index%5===4;
     const title=invite?"You're In!":accepted?'New Friend!':'New friend request!';
-    const description=invite?`Your request to join ${esc(row.event.title)} was accepted! Tap to see who else is going.`:accepted?`${esc(row.person.name)} accepted your request. Tap to view their profile`:`Tap to accept ${esc(row.person.name)} as a friend`;
+    const description=invite?`Your request to join ${esc(displayEventTitle(row.event))} was accepted! Tap to see who else is going.`:accepted?`${esc(row.person.name)} accepted your request. Tap to view their profile`:`Tap to accept ${esc(row.person.name)} as a friend`;
     return `<button class="personal-notification-row" data-action="${invite?'preview-event-notification':'preview-friend-notification'}" data-id="${invite?row.event.id:esc(row.person.id)}" data-name="${esc(row.person.name)}" data-kind="${accepted?'friend':'request'}">${avatar(row.person,'notification-avatar')}<span class="personal-notification-copy"><strong>${title}</strong><span>${description} ${invite?'':`<time>${Math.max(1,Math.floor(row.minutesAgo/1440))}d</time>`}</span></span>${invite&&row.event.image?`<img class="personal-event-art" src="${esc(row.event.image)}" alt="">`:''}</button>`;
   };
   return `<div class="personal-activity-feed">${recent?`<h2 class="notification-group">Recent Invites</h2>${personalRow(recent,0,true)}`:''}<h2 class="notification-group">Last 7 Days</h2>${rest.map((row,index)=>personalRow(row,index)).join('')}</div>`;
@@ -305,7 +321,7 @@ function profilePanel(profile,tab) {
   if(tab==='groups')return `<div class="profile-group-actions"><button data-action="profile-create-group">Create Group<span>${icon('plus')}</span></button><button data-action="profile-join-group">Join Group<span>${icon('next')}</span></button></div>${(profile.groups||[]).length?`<h2>Groups</h2>${profile.groups.map(group=>`<button class="profile-person-row" data-action="profile-group" data-id="${esc(group.id)}">${avatar(group)}<strong>${esc(group.name)}</strong></button>`).join('')}`:''}<h2>Suggested</h2>${profileGroupTemplates.map(template=>`<div class="profile-group-suggestion"><img src="${esc(template.photo)}" alt=""><span><strong>${esc(template.name)}</strong><small>${esc(template.description)}</small></span><button data-action="profile-create-group">Create</button></div>`).join('')}`;
   const events=(profile.events||eventStore.listEvents().filter(event=>event.access==='invited')).slice().sort((a,b)=>(a.startsAt||'').localeCompare(b.startsAt||'')),past=events.filter(event=>event.endsAt&&new Date(event.endsAt)<new Date()),upcoming=events.filter(event=>!past.includes(event));
   let group='';
-  const row=event=>`<a class="profile-event-row" href="#/event/${event.id}"><span class="profile-event-art">${poster(event)}</span><span class="profile-event-copy"><small>${event.hostPhoto?hostAvatar(event):''}${esc(event.host)}</small><strong>${esc(event.title)}</strong><span class="profile-event-time">${dateParts(event).full} ${dateParts(event).time} | ${esc(event.location)}</span></span></a>`;
+  const row=event=>`<a class="profile-event-row" href="#/event/${event.id}"><span class="profile-event-art">${poster(event)}</span><span class="profile-event-copy"><small>${event.hostPhoto?hostAvatar(event):''}${esc(event.host)}</small><strong>${esc(displayEventTitle(event))}</strong><span class="profile-event-time">${dateParts(event).full} ${dateParts(event).time} | ${esc(event.location)}</span></span></a>`;
   return upcoming.map(event=>{const date=dateParts(event).full,heading=group===date?'':`<h2 class="profile-event-day">${date}</h2>`;group=date;return heading+row(event);}).join('')+(past.length?`<h2 class="profile-event-day past-events-heading">Past Events</h2>${past.reverse().map(row).join('')}`:'')||'<p class="profile-empty">Your events will appear here.</p>';
 
 }
@@ -424,8 +440,8 @@ function render({background=false}={}) {
   document.body.dataset.page = qr ? 'invite' : parts[0] || 'home';
   pageNavigation.syncVisibility();
   if (qr) {
-    if(!background)window.InviteView.show(event,eventStore.getProfile(), { live: event.source === 'doorlist' });
-    document.title = `${event.title} — Your invite`;
+    if(!background)window.InviteView.show({...event,title:displayEventTitle(event)},eventStore.getProfile(), { live: event.source === 'doorlist' });
+    document.title = `${displayEventTitle(event)} — Your invite`;
   } else {
     window.InviteView.hide();
     const restored=!background?pageNavigation.restore(route):null;
@@ -440,7 +456,7 @@ function render({background=false}={}) {
     else if (parts[0]==='profile') markup = profilePage();
     else markup = home();
     if(!restored){if(background)patchSurface(app,markup);else app.innerHTML=markup;}
-    document.title = event ? `${event.title} — Doorlist` : 'Doorlist';
+    document.title = event ? `${displayEventTitle(event)} — Doorlist` : 'Doorlist';
   }
   if (currentRoute !== route) {
     if(!pageNavigation.scroller.scrollTop)pageNavigation.scroller.scrollTo(0,['back','dismiss'].includes(document.documentElement.dataset.navigation) ? savedScroll.get(route)||0 : 0);
@@ -448,7 +464,7 @@ function render({background=false}={}) {
   }
   currentRoute = route;
   if(background){pageNavigation.scroller.scrollTo(0,previousY);for(const [className,left] of rails){const rail=app.getElementsByClassName(className)[0];if(rail)rail.scrollLeft=left;}}
-  queueMicrotask(bindTemplateMotion);
+  queueMicrotask(bindTemplateMotion);queueMicrotask(bindEventTitleFit);
   if(parts[2]==='guests')queueMicrotask(bindGuestScroll);
   if(!qr&&parts.length===0&&activeHeroId){const rail=app.querySelector('.coming-up-rail');const card=rail?.querySelector(`a[href="#/event/${activeHeroId}"]`);if(card)rail.scrollLeft=card.offsetLeft-rail.offsetLeft;}
   if (event?.source === 'doorlist' && !qr) hydrateEventRoute(event, parts[2] === 'guests');
@@ -487,16 +503,16 @@ async function shareEvent(id) {
   const event=eventStore.getEvent(id);if(!event)return;
   const url=event.sourceUrl||`${location.href.split('#')[0]}#/event/${id}`;
   if(navigator.share){
-    try{await navigator.share({title:event.title,url});return;}
+    try{await navigator.share({title:displayEventTitle(event),url});return;}
     catch(error){if(error.name==='AbortError')return;}
   }
-  sheet('Share event',`<div class="share-event-preview">${event.image?`<img src="${esc(event.image)}" alt="">`:''}<strong>${esc(event.title)}</strong></div><label class="auth-label" for="shareUrl">Event link</label><input id="shareUrl" class="auth-input" value="${esc(url)}" readonly><button class="primary-button" data-action="copy-link" data-id="${id}">${icon('share')}Copy link</button>`);
+  sheet('Share event',`<div class="share-event-preview">${event.image?`<img src="${esc(event.image)}" alt="">`:''}<strong>${esc(displayEventTitle(event))}</strong></div><label class="auth-label" for="shareUrl">Event link</label><input id="shareUrl" class="auth-input" value="${esc(url)}" readonly><button class="primary-button" data-action="copy-link" data-id="${id}">${icon('share')}Copy link</button>`);
 }
 function plusOneSheet(id) {
   const event = eventStore.getEvent(id);
   if (!event) return;
   if (event.source === 'doorlist') return sheet('Bring a +1', `<p class="dialog-description">Manage your +1 request with the event’s hosts in Doorlist.</p><a class="primary-button" href="${esc(event.sourceUrl)}" target="_blank" rel="noopener noreferrer">Open Doorlist</a>`);
-  sheet(event.plusOneRequested ? 'Request saved' : 'Bring a +1', `<div class="dialog-illustration">${icon('people')}</div><p class="dialog-description">${event.plusOneRequested ? 'Your +1 request is saved in this preview.' : 'Request an extra invite for '+esc(event.title)+'.'}</p><p class="dialog-note">Hosts will receive requests once your account is connected.</p><button class="primary-button" data-action="${event.plusOneRequested ? 'close-dialog' : 'request-plus-one'}" data-id="${id}">${event.plusOneRequested ? 'Done' : 'Save +1 request'}</button>`);
+  sheet(event.plusOneRequested ? 'Request saved' : 'Bring a +1', `<div class="dialog-illustration">${icon('people')}</div><p class="dialog-description">${event.plusOneRequested ? 'Your +1 request is saved in this preview.' : 'Request an extra invite for '+esc(displayEventTitle(event))+'.'}</p><p class="dialog-note">Hosts will receive requests once your account is connected.</p><button class="primary-button" data-action="${event.plusOneRequested ? 'close-dialog' : 'request-plus-one'}" data-id="${id}">${event.plusOneRequested ? 'Done' : 'Save +1 request'}</button>`);
 }
 document.addEventListener('click', async event => {
   const hero=event.target.closest('.coming-up-rail .event-card');if(hero)activeHeroId=hero.getAttribute('href').split('/').at(-1);
