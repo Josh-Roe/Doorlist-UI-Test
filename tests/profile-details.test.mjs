@@ -20,7 +20,7 @@ test('RSVP appearance uses each event theme and strips invalid CSS values',()=>{
 test('the profile retains Doorlist total event count separately from its upcoming preview',async()=>{
  const p=new DoorlistProvider();p.profile={id:'self'};p.token=async()=>'test-token';p.loadOwnPastEvents=async events=>events;
  p.api=async path=>path.startsWith('/api/users/uuid/')?{uuid:'self',name:'Self',friends:[]}:path.startsWith('/api/users/groups/')?{groups:[]}:path.startsWith('/api/events/profile/')?{eventCount:7,lightEvents:[{eventId:'upcoming-1',name:'Upcoming',time:Date.now()+3600000}]}:{};
- const result=await p.loadProfile();assert.equal(result.profile.eventCount,7);assert.equal(result.profile.eventCountComplete,true);assert.equal(result.profile.events.length,1);assert.equal(result.profile.detailsVersion,10);
+ const result=await p.loadProfile();assert.equal(result.profile.eventCount,7);assert.equal(result.profile.eventCountComplete,true);assert.equal(result.profile.events.length,1);assert.equal(result.profile.detailsVersion,12);
 });
 test('past event discovery is constrained to the authenticated user guest records',async()=>{
  const p=new DoorlistProvider();p.profile={id:'self'};p.firebase=async()=>'test-token';let read=[];
@@ -51,4 +51,19 @@ test('a partial account feed does not claim its known events are the full native
  const p=new DoorlistProvider();p.profile={id:'self'};p.token=async()=>'web';p.firebase=async()=>'native';p.loadOwnPastEvents=async()=>[{id:'past-known',title:'Known past'}];
  p.api=async path=>path.startsWith('/api/users/uuid/')?{uuid:'self',name:'Self',friends:[]}:path.startsWith('/api/events/profile/')?{eventCount:0,lightEvents:[]}:{};p.request=async()=>({eventCount:35,lightEvents:[]});
  const {profile}=await p.loadProfile();assert.equal(profile.eventCount,1);assert.equal(profile.eventCountComplete,false);
+});
+test('the native account total includes past events even when web eligibility and previews are smaller',async()=>{
+ const p=new DoorlistProvider();p.profile={id:'self'};p.token=async()=>'web';p.loadOwnPastEvents=async()=>[{id:'past-known',title:'Known past'}];
+ p.api=async path=>path.startsWith('/api/users/uuid/')?{uuid:'self',name:'Self',friends:[]}:path.startsWith('/api/events/forUser/')?{totalEventCount:7,eligibleEventCount:2,events:[]}:path.startsWith('/api/events/profile/')?{eventCount:0,lightEvents:[]}:{};
+ const {profile}=await p.loadProfile();assert.equal(profile.eventCount,7);assert.equal(profile.eventCountComplete,true);assert.equal(profile.eventCountVerified,true);assert.equal(profile.profileHistoryComplete,false);
+});
+test('zero is an authoritative account total rather than an unknown count',async()=>{
+ const p=new DoorlistProvider();p.profile={id:'self'};p.token=async()=>'web';p.loadOwnPastEvents=async()=>[];
+ p.api=async path=>path.startsWith('/api/users/uuid/')?{uuid:'self',name:'Self',friends:[]}:path.startsWith('/api/events/forUser/')?{totalEventCount:0,eligibleEventCount:0,events:[]}:{};
+ const {profile}=await p.loadProfile();assert.equal(profile.eventCount,0);assert.equal(profile.eventCountComplete,true);assert.equal(profile.profileHistoryComplete,true);
+});
+test('a temporary account-feed outage preserves the last complete native total',async()=>{
+ const p=new DoorlistProvider();p.profile={id:'self',eventCount:7,eventCountComplete:true};p.token=async()=>'web';p.loadOwnPastEvents=async()=>[{id:'past-known',title:'Known past'}];
+ p.api=async path=>{if(path.includes('/forUser/'))throw Error('Temporary outage');return path.startsWith('/api/users/uuid/')?{uuid:'self',name:'Self',friends:[]}:{};};
+ const {profile}=await p.loadProfile();assert.equal(profile.eventCount,7);assert.equal(profile.eventCountComplete,true);
 });

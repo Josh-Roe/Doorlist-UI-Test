@@ -232,3 +232,8 @@ test('campus imports are scoped to the signed-in school and public visibility, f
  const result=await p.campusEvents();assert.equal(calls,2);assert.equal(result.events.length,201);assert.equal(result.partial,false);
  assert.equal(result.events.at(-1).name,'MONSTER MOSH');assert.equal(result.events.at(-1).address,undefined);
 });
+test('background sync preserves ended account events for profile history and imports the native total',async()=>{
+ const p=provider();p.profile.events=[{id:'past-own',location:'Actual address',locationAddress:'Actual address'}];p.groupEvents=async()=>({events:[]});p.campusEvents=async()=>({events:[]});p.enrichEventPhotos=async()=>{};
+ p.api=async path=>path.includes('forUser')?{totalEventCount:7,eligibleEventCount:1,events:[raw('future-own'),raw('past-own',{time:now-7200000,endTime:now-3600000})]}:{};
+ const result=await p.syncEvents();assert.equal(result.profile.eventCount,7);assert.equal(result.profile.eventCountComplete,true);assert.equal(result.events.length,1);assert.ok(result.profile.events.some(event=>event.id==='past-own'));assert.equal(result.profile.events.find(event=>event.id==='past-own').location,'Actual address');
+});

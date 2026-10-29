@@ -176,6 +176,12 @@ function obfuscatePhone(phone) {
   const digits = phone.replace(/\D/g, '').split('').map(char => 'jabcdefghi'[Number(char)]);
   return padding(14) + digits.map((char, index) => char + (index < digits.length - 1 ? letter() : '')).join('') + padding(15);
 }
+function mergeHistoryEvent(previous={},incoming) {
+  return {...previous,...incoming,location:incoming.locationAddress?incoming.location:previous.location||incoming.location,
+    locationAddress:incoming.locationAddress||previous.locationAddress||'',image:incoming.image||previous.image||'',hostPhoto:incoming.hostPhoto||previous.hostPhoto||'',
+    background:incoming.background||previous.background||null,fontFamily:incoming.fontFamily||previous.fontFamily||null,
+    rsvp:incoming.rsvp==='invited'?previous.rsvp||incoming.rsvp:incoming.rsvp};
+}
 export class DoorlistProvider {
   constructor({ fetchImpl = fetch, config = publishedConfig, clock = Date.now } = {}) {
     // Keep native fetch unbound to this provider; Workers requires its global receiver.
@@ -307,6 +313,12 @@ export class DoorlistProvider {
     const own = results[0];
     // A denied or failed account feed must not quietly turn into an empty successful import.
     if (own.status === 'rejected') throw own.reason;
+    // Retain account events before the home feed removes ended events, so they age into history automatically.
+    const history=new Map((this.profile.events||[]).map(event=>[event.id,event]));
+    for(const raw of own.value.events||[]){const event=normalizeEvent(raw,'invited');if(event&&!raw.isCancelled&&!raw.isCanceled)history.set(event.id,mergeHistoryEvent({...history.get(event.id),...this.allowedEvents.get(event.id)},event));}
+    this.profile.events=[...history.values()];
+    const total=own.value.totalEventCount;
+    if(Number.isInteger(total)&&total>=0)Object.assign(this.profile,{eventCount:total,eventCountVerified:true,eventCountComplete:true});
     const merged = new Map();
     for (let i = results.length - 1; i >= 0; i--) {
       const result = results[i];
@@ -453,43 +465,41 @@ export class DoorlistProvider {
       groups=rows.map(group=>({id:String(group.id||group.uuid||''),name:String(group.name||group.orgName||'Group'),photo:safeImage(group.orgCoverPhoto||group.profilePicture||group.image)})).filter(group=>group.id);
     }catch{/* Group access is optional. */}
     try {
-      const token=await this.token(),attempts=[];
-      const variants=[this.profile.id];if(/^[a-f0-9-]{36}$/i.test(this.profile.id)&&this.profile.id!==this.profile.id.toLowerCase())variants.push(this.profile.id.toLowerCase());
-      const results=await Promise.all(variants.map(async id=>{
-        try {const result=await this.api(`/api/events/profile/${encodeURIComponent(id)}?token=${encodeURIComponent(token)}`);attempts.push({identityCase:id===this.profile.id?'canonical':'lowercase',status:200,total:typeof result.eventCount==='number'?result.eventCount:null,rows:Array.isArray(result.lightEvents)?result.lightEvents.length:Array.isArray(result.events)?result.events.length:null});return result;}
-        catch(error){attempts.push({identityCase:id===this.profile.id?'canonical':'lowercase',status:error.status||502});return null;}
-      }));
-      let result=results.filter(Boolean).sort((a,b)=>(Number(b.eventCount)||0)-(Number(a.eventCount)||0))[0]||{};
+      const token=await this.token();
+      const [accountResult,previewResult]=await Promise.allSettled([
+        this.api(`/api/events/forUser/${encodeURIComponent(this.profile.id)}?token=${encodeURIComponent(token)}`),
+        this.api(`/api/events/profile/${encodeURIComponent(this.profile.id)}?token=${encodeURIComponent(token)}`),
+      ]);
+      const account=accountResult.status==='fulfilled'?accountResult.value:null;
+      const preview=previewResult.status==='fulfilled'?previewResult.value:null;
       const existing=new Map((this.profile.events||[]).map(event=>[event.id,event]));
-      const absorb=source=>{for(const raw of Array.isArray(source.lightEvents)?source.lightEvents:Array.isArray(source.events)?source.events:[]){const event=normalizeEvent(raw,'invited');if(event)existing.set(event.id,{...this.allowedEvents.get(event.id),...event});}};
-      results.filter(Boolean).forEach(absorb);
-      for(const event of this.allowedEvents.values())if(event.hasAdmission||event.rsvp==='going')existing.set(event.id,event);
-      profileEvents=await this.loadOwnPastEvents([...existing.values()]);
-      if(!(Number(result.eventCount)>0)) {
-        try {const nativeToken=await this.firebase(),nativeResult=await this.request(`https://doorlist.app/api/events/profile/${encodeURIComponent(this.profile.id)}?token=${encodeURIComponent(nativeToken)}`,{headers:{Authorization:`Bearer ${nativeToken}`}});attempts.push({authentication:'firebase',status:200,total:typeof nativeResult.eventCount==='number'?nativeResult.eventCount:null,rows:Array.isArray(nativeResult.lightEvents)?nativeResult.lightEvents.length:null});if(Number(nativeResult.eventCount)>Number(result.eventCount||0)){result=nativeResult;absorb(nativeResult);profileEvents=[...new Map([...profileEvents,...existing.values()].map(event=>[event.id,event])).values()];}}
-        catch(error){attempts.push({authentication:'firebase',status:error.status||502});}
+      for(const source of [account,preview])for(const raw of [...(source?.events||[]),...(source?.lightEvents||[])]) {
+        const event=normalizeEvent(raw,'invited');if(event)existing.set(event.id,mergeHistoryEvent({...existing.get(event.id),...this.allowedEvents.get(event.id)},event));
       }
-      const webTotal=Math.max(0,...results.filter(Boolean).map(result=>Number.isInteger(result.eventCount)?result.eventCount:0));
-      eventCount=webTotal>0?Math.max(webTotal,profileEvents.length):profileEvents.length||null;
-      eventCountComplete=webTotal>0&&webTotal>=profileEvents.length;
-      const claims=token=>{try{return JSON.parse(atob(token.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));}catch{return {};}};
-      const supabase=claims(this.accessToken||''),firebase=claims(this.firebaseToken||'');
-      this.profile.eventCoverage={attempts,historyStatus:this.profileEventLookupStatus,supabaseMatchesProfile:String(supabase.sub||'').toLowerCase()===this.profile.id.toLowerCase(),firebaseMatchesProfile:String(firebase.user_id||firebase.sub||'').toLowerCase()===this.profile.id.toLowerCase(),arrayFields:Object.keys(user).filter(key=>Array.isArray(user[key])),records:this.profileRecordCoverage||null};
-    }catch(error){this.profile.eventCoverage={failed:true,errorType:String(error.name||'Error'),reason:['TypeError','ReferenceError'].includes(error.name)?String(error.message||'').slice(0,160):'Profile event feed unavailable'};}
+      for(const event of this.allowedEvents.values())if(event.hasAdmission||event.rsvp==='going')existing.set(event.id,event);
+      profileEvents=await this.loadOwnPastEvents([...existing.values()],account);
+      // This account-scoped total includes past events; eligibleEventCount and preview rows do not.
+      const accountTotal=account?.totalEventCount;
+      const previewTotal=preview?.eventCount;
+      if(Number.isInteger(accountTotal)&&accountTotal>=0){eventCount=accountTotal;eventCountComplete=true;}
+      else if(this.profile.eventCountComplete&&Number.isInteger(this.profile.eventCount)){eventCount=this.profile.eventCount;eventCountComplete=true;}
+      else if(Number.isInteger(previewTotal)&&previewTotal>0){eventCount=previewTotal;eventCountComplete=true;}
+      else eventCount=profileEvents.length||null;
+      this.profile.eventCoverage={historyStatus:this.profileEventLookupStatus,accountTotal:Number.isInteger(accountTotal)?accountTotal:null,loaded:profileEvents.length,records:this.profileRecordCoverage||null};
+    }catch{/* Preserve the last verified account total and cached history during an upstream outage. */}
     this.profile={...this.profile,name:String(user.name||this.profile.name),photo:safeImage(user.profilePicture||user.profilePhotoUrl)||this.profile.photo,
       school:String(user.school||this.profile.school||''),bio:String(user.bio||''),shortId:String(user.shortID||this.profile.shortId||''),
       ...(friendsKnown?{friendCount:ids.length}:{}),...(friends?{friends}:{}),...(groups?{groups,groupCount:groups.length}:{}),
-      ...(profileEvents?{events:profileEvents}:{}),eventCount:eventCount??(this.profile.eventCountVerified?this.profile.eventCount:null),eventCountVerified:this.profileEventLookupStatus===200,eventCountComplete,profileEventLookupStatus:this.profileEventLookupStatus||null,detailsVersion:10,detailsUpdatedAt:this.clock()};
+      ...(profileEvents?{events:profileEvents}:{}),eventCount:eventCount??(this.profile.eventCountVerified?this.profile.eventCount:null),eventCountVerified:eventCountComplete||this.profileEventLookupStatus===200,eventCountComplete:eventCountComplete||Boolean(this.profile.eventCountComplete),profileHistoryComplete:eventCountComplete&&profileEvents?.length===eventCount,profileEventLookupStatus:this.profileEventLookupStatus||null,detailsVersion:12,detailsUpdatedAt:this.clock()};
     this.profile.shareUrl=this.profile.shareUrl||profileShareUrl(this.profile.id,this.profile.shortId);
     if(this.profile.shareUrl&&!this.profile.shareQr)this.profile.shareQr=await QRCode.toString(this.profile.shareUrl,{type:'svg',margin:1,color:{dark:'#ffffff',light:'#00000000'}});
     this.rememberProfiles([this.profile]);
     return {profile:this.profile,profiles:this.listProfiles()};
   }
-  async loadProfileEventRecords(existing) {
+  async loadProfileEventRecords(existing,account=null) {
     const candidates=new Map(existing.map(event=>[event.id,event])),feeds=[];
-    const add=response=>{const rows=[...(Array.isArray(response?.events)?response.events:[]),...(Array.isArray(response?.lightEvents)?response.lightEvents:[])];for(const raw of rows){const event=normalizeEvent(raw,'invited');if(event)candidates.set(event.id,{...candidates.get(event.id),...event,administrator:String(raw.administrator||'')});}return rows;};
-    try {const token=await this.token(),response=await this.api(`/api/events/forUser/${encodeURIComponent(this.profile.id)}?token=${encodeURIComponent(token)}`),rows=add(response);feeds.push({authentication:'supabase',status:200,rows:rows.length});}catch(error){feeds.push({authentication:'supabase',status:error.status||502});}
-    try {const token=await this.firebase(),response=await this.request(`https://doorlist.app/api/events/forUser/${encodeURIComponent(this.profile.id)}?token=${encodeURIComponent(token)}`,{headers:{Authorization:`Bearer ${token}`}}),rows=add(response);feeds.push({authentication:'firebase',status:200,rows:rows.length});}catch(error){feeds.push({authentication:'firebase',status:error.status||502});}
+    const add=response=>{const rows=[...(Array.isArray(response?.events)?response.events:[]),...(Array.isArray(response?.lightEvents)?response.lightEvents:[])];for(const raw of rows){const event=normalizeEvent(raw,'invited');if(event)candidates.set(event.id,{...mergeHistoryEvent(candidates.get(event.id),event),administrator:String(raw.administrator||candidates.get(event.id)?.administrator||'')});}return rows;};
+    try {const response=account||await this.api(`/api/events/forUser/${encodeURIComponent(this.profile.id)}?token=${encodeURIComponent(await this.token())}`),rows=add(response);feeds.push({authentication:'account',status:200,rows:rows.length,total:response.totalEventCount});}catch(error){feeds.push({authentication:'account',status:error.status||502});}
     // Public campus cards provide candidate IDs only. Attendance still comes from this user's own guest record.
     try {const response=await this.campusEvents(),rows=add(response);feeds.push({authentication:'campus',status:200,rows:rows.length,partial:Boolean(response.partial)});}catch(error){feeds.push({authentication:'campus',status:error.status||502});}
     this.profileRecordCoverage={feeds,candidates:candidates.size,statuses:{},unavailable:0};
@@ -506,9 +516,9 @@ export class DoorlistProvider {
     this.profileEventLookupStatus=this.profileRecordCoverage.unavailable||candidates.size>500||feeds.some(feed=>feed.partial)?206:200;
     return confirmed;
   }
-  async loadOwnPastEvents(existing) {
+  async loadOwnPastEvents(existing,account=null) {
     this.profileEventLookupStatus=null;
-    try{return await this.loadProfileEventRecords(existing);}catch{/* Fall back to an authorized owner-record query when the feed is unavailable. */}
+    try{return await this.loadProfileEventRecords(existing,account);}catch{/* Fall back to an authorized owner-record query when the feed is unavailable. */}
     try {
       const token=await this.firebase();
       const rows=await this.request(`https://firestore.googleapis.com/v1/projects/${this.config.firebaseProjectId}/databases/(default)/documents:runQuery`,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({structuredQuery:{from:[{collectionId:'guests',allDescendants:true}],where:{fieldFilter:{field:{fieldPath:'uuid'},op:'EQUAL',value:{stringValue:this.profile.id}}},limit:100}})});

@@ -317,7 +317,7 @@ function profilePage() {
 }
 async function hydrateProfile() {
   const profile=eventStore.getProfile();
-  if(!eventStore.authenticated||profilePending||(profile.detailsVersion===10&&profile.detailsUpdatedAt&&Date.now()-profile.detailsUpdatedAt<300000))return;
+  if(!eventStore.authenticated||profilePending||(profile.detailsVersion===12&&profile.detailsUpdatedAt&&Date.now()-profile.detailsUpdatedAt<300000))return;
   profilePending=true;profileError='';
   try{await eventStore.loadProfile();}catch(error){profileError=error.message;}finally{profilePending=false;}
 }
